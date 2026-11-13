@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nakładanie planów (PDF / DWG) na mapę</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root{--bg:#f4f5f7;--panel:#fff;--line:#d9dce1;--ink:#1d2330;--mute:#6b7280;--acc:#d6262b;--acc2:#1f6feb;}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;}
+  body{display:flex;flex-direction:column;font:13px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink);background:var(--bg)}
+  header{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;padding:6px 10px;background:var(--panel);border-bottom:1px solid var(--line)}
+  header .grp{display:flex;gap:6px;align-items:center;padding-right:10px;border-right:1px solid var(--line)}
+  header .grp:last-child{border-right:0}
+  h1{font-size:14px;margin:0 6px 0 0;white-space:nowrap}
+  button,select,input{font:inherit}
+  button{padding:4px 9px;border:1px solid var(--line);background:#fff;border-radius:5px;cursor:pointer;white-space:nowrap}
+  button:hover{background:#f0f2f5}
+  button.on{background:var(--acc);border-color:var(--acc);color:#fff}
+  button.primary{background:var(--acc2);border-color:var(--acc2);color:#fff}
+  button:disabled{opacity:.45;cursor:default}
+  input[type=number]{width:62px;padding:3px 4px}
+  input[type=text]{padding:3px 6px}
+  label{display:inline-flex;gap:4px;align-items:center;white-space:nowrap}
+  main{display:flex;flex:1;min-height:0}
+  #left{display:flex;flex-direction:column;width:42%;min-width:280px;border-right:1px solid var(--line);background:var(--panel)}
+  #planWrap{position:relative;flex:1;min-height:120px;background:#eceef1;overflow:hidden}
+  #plan{position:absolute;inset:0;cursor:grab;touch-action:none}
+  #planHint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--mute);padding:20px;pointer-events:none}
+  #info{height:260px;overflow:auto;border-top:1px solid var(--line);padding:8px 10px}
+  #info h3{font-size:12px;margin:8px 0 4px;text-transform:uppercase;letter-spacing:.04em;color:var(--mute)}
+  table{border-collapse:collapse;width:100%}
+  td,th{border-bottom:1px solid #eef0f3;padding:3px 4px;text-align:left;font-variant-numeric:tabular-nums}
+  th{font-weight:600;color:var(--mute);font-size:12px}
+  td button{padding:1px 6px;font-size:12px}
+  td input{width:100%;padding:2px 4px}
+  #mapWrap{position:relative;flex:1}
+  #map{position:absolute;inset:0}
+  #status{position:absolute;left:50%;top:10px;transform:translateX(-50%);z-index:1000;background:rgba(20,24,32,.88);color:#fff;padding:6px 12px;border-radius:6px;max-width:80%;text-align:center;display:none}
+  #coordBox{position:absolute;left:10px;bottom:24px;z-index:1000;background:#fff;border:1px solid var(--line);border-radius:6px;padding:8px;display:none;box-shadow:0 2px 10px rgba(0,0,0,.15)}
+  #coordBox input{width:120px}
+  .fitline{padding:4px 0;color:var(--ink)}
+  .warn{color:#b45309}
+  .cp-icon div{background:var(--acc);color:#fff;border:2px solid #fff;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;box-shadow:0 1px 4px rgba(0,0,0,.5)}
+  .pin-icon div{background:var(--acc2);color:#fff;border:2px solid #fff;border-radius:50% 50% 50% 0;transform:rotate(-45deg);width:20px;height:20px;box-shadow:0 1px 4px rgba(0,0,0,.5)}
+  .leaflet-popup-content{font-size:12px;margin:10px 12px}
+  .leaflet-popup-content table td{border:0;padding:1px 6px 1px 0}
+  .muted{color:var(--mute)}
+  #dragbar{width:5px;cursor:col-resize;background:transparent;margin-left:-3px;z-index:5}
+  #dragbar:hover{background:#c8ccd3}
+  .tabs{display:flex;gap:4px;margin:-2px 0 6px;position:sticky;top:-8px;background:#fff;padding:4px 0;z-index:2}
+  .tabs button{border-radius:5px 5px 0 0;border-bottom-color:transparent}
+  .tabs button.sel{background:#1d2330;color:#fff;border-color:#1d2330}
+  .cadhead{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)}
+  .laylist{columns:2 260px;column-gap:16px;padding:4px 0 10px}
+  .layrow{display:flex;gap:6px;align-items:center;break-inside:avoid;padding:1px 0;white-space:nowrap;overflow:hidden}
+  .layrow .ln{overflow:hidden;text-overflow:ellipsis;flex:1}
+  .sw{width:10px;height:10px;border-radius:2px;border:1px solid rgba(0,0,0,.25);flex:none}
+  #left.nopdf #planWrap{display:none}
+  #left.nopdf #info{flex:1;height:auto}
+  #geoBox{position:absolute;left:10px;right:auto;bottom:24px;z-index:1001;background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 10px;display:none;box-shadow:0 2px 10px rgba(0,0,0,.2);max-width:min(420px,calc(100% - 20px))}
+  #geoBox .row{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  #geoBox .big{font-size:15px;font-weight:600}
+  #btnGeoMap{position:absolute;right:10px;bottom:90px;z-index:1001;width:44px;height:44px;border-radius:50%;font-size:20px;padding:0;box-shadow:0 2px 8px rgba(0,0,0,.3)}
+  #btnGeoMap.on{background:#1a73e8;border-color:#1a73e8;color:#fff}
+  #btnGeoMap.lost{background:#fff;color:#1a73e8;border-color:#1a73e8}
+  #btnPanel{display:none}
+  @media (max-width:820px){
+    header{padding:4px 6px;gap:4px 6px}
+    header .grp{border-right:0;padding-right:4px;flex-wrap:wrap;max-width:100%}
+    header .grp:first-of-type{width:100%}
+    #file{flex:1 1 100%;max-width:100%!important}
+    #recent{flex:1;max-width:none!important}
+    header label[title^="Strona"],header label[title^="Rozdzielczość"]{display:none}
+    header .grp[title^="Ustawienia"]{display:none}
+    header .grp:has(#op){display:none}
+    #btnSave,#btnLayout,#btnKmz,label:has(#loadJson){display:none}
+    header .grp:last-child{width:100%}
+    header .grp.desk{display:none}
+    h1{display:none}
+    main{flex-direction:column}
+    #left{width:100%!important;height:42%;min-width:0;border-right:0;border-bottom:1px solid var(--line)}
+    #left.collapsed{display:none}
+    #dragbar{display:none}
+    #info{height:auto;flex:1}
+    #btnPanel{display:inline-block}
+    #search{width:100%!important}
+    .laylist{columns:1}
+    #coordBox{bottom:80px}
+  }
+  main.vert{flex-direction:column}
+  main.vert #left{width:100%!important;height:46%;min-height:200px;border-right:0;border-bottom:1px solid var(--line);flex-direction:row}
+  main.vert #info{height:auto;width:420px;border-top:0;border-left:1px solid var(--line)}
+  main.vert #dragbar{display:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>Plan → mapa</h1>
+  <div class="grp">
+    <input type="file" id="file" multiple style="max-width:220px" title="PDF / obraz (plan do dopasowania) albo DWG / DXF (w układzie PL-2000 lub PL-1992 – nakłada się sam)">
+    <select id="recent" title="Ostatnio otwierane pliki (zapamiętane w tej przeglądarce)" style="max-width:150px"><option value="">Ostatnie pliki…</option></select>
+    <button id="btnPanel" title="Pokaż / ukryj panel">☰ Panel</button>
+    <label title="Strona PDF">str. <input type="number" id="page" min="1" value="1" style="width:46px"></label>
+    <label title="Rozdzielczość renderowania: pikseli na punkt PDF. Większa = ostrzejszy plan na dużym zbliżeniu, ale więcej pamięci.">rozdz. <select id="res"><option value="1">1×</option><option value="2" selected>2×</option><option value="3">3×</option><option value="4">4×</option></select></label>
+  </div>
+  <div class="grp desk">
+    <button id="btnCP" class="primary" disabled>+ Punkt dopasowania</button>
+    <label title="Skala planu stała (tylko obrót i przesunięcie). Wymaga podanej skali.">
+      <input type="checkbox" id="lock"> skala 1:<input type="number" id="den" value="500" style="width:58px"></label>
+  </div>
+  <div class="grp">
+    <label>krycie <input type="range" id="op" min="0" max="100" value="80" style="width:90px"></label>
+    <select id="cm" title="Kolory planu na mapie">
+      <option value="dark" selected>czarne → kolor</option>
+      <option value="orig">oryginalne kolory</option>
+      <option value="mono">wszystko w jednym kolorze</option>
+    </select>
+    <input type="color" id="col" value="#ffee00" title="Kolor wyróżnienia">
+    <label title="Białe tło planu przezroczyste"><input type="checkbox" id="white" checked> bez białego tła</label>
+    <label><input type="checkbox" id="showOv" checked> plan</label>
+  </div>
+  <div class="grp" title="Ustawienia rysunków DWG/DXF">
+    <b class="muted">DWG:</b>
+    <select id="cadMono"><option value="orig">kolory z rysunku</option><option value="mono">kolor wyróżnienia</option></select>
+    <label><input type="checkbox" id="cadTxt" checked> opisy</label>
+    <label title="Klik na mapie przyciąga do wierzchołków i punktów wstawienia bloków"><input type="checkbox" id="snap" checked> przyciąganie</label>
+  </div>
+  <div class="grp">
+    <button id="btnPin" disabled title="Kliknięcie na planie lub mapie dodaje pinezkę">Pinezki</button>
+    <button id="btnFitView" disabled>Pokaż plan</button>
+    <button id="btnLayout" title="Plan obok mapy / nad mapą (wygodniejsze dla długich planów)">⇅ Układ</button>
+    <button id="btnKmz" disabled title="Plan + pinezki do Google Earth">Eksport KMZ</button>
+    <button id="btnSave" disabled>Zapisz dopasowanie</button>
+    <label class="muted" style="cursor:pointer"><input type="file" id="loadJson" accept=".json,application/json" style="display:none">Wczytaj dopasowanie…</label>
+  </div>
+  <div class="grp">
+    <input type="text" id="search" placeholder="Szukaj: miejscowość / 52.89, 17.22 / X Y (PL-2000)" style="width:290px">
+  </div>
+</header>
+<main>
+  <section id="left">
+    <div id="planWrap">
+      <canvas id="plan"></canvas>
+      <div id="planHint">Wczytaj plan: PDF lub obraz – albo DWG / DXF (rysunki w PL-2000 / PL-1992 nakładają się same, bez punktów).<br><br>Dla PDF:Potem dodaj min. 2 punkty dopasowania: kliknij punkt na planie, a następnie ten sam punkt na mapie (albo wpisz jego współrzędne, np. krzyż siatki PL-2000).<br><br>Kółko myszy – zoom, przeciąganie – przesuwanie.</div>
+    </div>
+    <div id="info">
+      <div class="tabs"><button data-t="tabFit" class="sel">Dopasowanie i pinezki</button><button data-t="tabLayers">Warstwy DWG</button><button data-t="tabElems">Elementy DWG</button></div>
+      <div class="tab" id="tabLayers" style="display:none">
+        <input type="text" id="layFilter" placeholder="filtr warstw, np. SRK" style="width:220px">
+        <div id="layerList"></div>
+      </div>
+      <div class="tab" id="tabElems" style="display:none">
+        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:6px">
+          <select id="elLayer" style="max-width:260px"></select>
+          <input type="text" id="elSearch" placeholder="szukaj nazwy, np. tA1" style="width:150px">
+          <label><input type="checkbox" id="elAttr" checked> tylko z atrybutami</label>
+          <span class="muted" id="elCount"></span>
+          <button id="elCsv" disabled>CSV</button><button id="elKml" disabled>KML</button><button id="elPins" disabled title="Dodaj wszystkie widoczne w tabeli do pinezek">→ pinezki</button>
+        </div>
+        <table id="elTable"><thead><tr><th>Nazwa</th><th>Warstwa</th><th>X (N)</th><th>Y (E)</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="tab" id="tabFit">
+      <div class="fitline" id="fitInfo">Brak dopasowania.</div>
+      <h3>Punkty dopasowania</h3>
+      <table id="cpTable"><thead><tr><th>#</th><th>plan [pt]</th><th>mapa</th><th>błąd</th><th></th></tr></thead><tbody></tbody></table>
+      <h3>Pinezki <span class="muted" style="text-transform:none;letter-spacing:0">
+        <button id="pinCsv" disabled>CSV</button> <button id="pinKml" disabled>KML</button> <button id="pinCopy" disabled>Kopiuj listę</button> <button id="pinClear" disabled>Usuń wszystkie</button></span></h3>
+      <table id="pinTable"><thead><tr><th>Nazwa</th><th>WGS84</th><th>PL-2000</th><th></th></tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+  </section>
+  <div id="dragbar"></div>
+  <section id="mapWrap">
+    <div id="map"></div>
+    <div id="status"></div>
+    <button id="btnGeoMap" title="Moja pozycja (GPS)">◎</button>
+    <div id="geoBox">
+      <div class="big" id="geoAcc">Szukam pozycji…</div>
+      <div id="geoXY" class="muted"></div>
+      <div id="geoNear" style="margin-top:4px"></div>
+      <div class="row">
+        <button id="geoPin" class="primary">+ Pinezka tutaj</button>
+        <button id="geoFollow">Śledź</button>
+        <button id="geoCopy">Kopiuj</button>
+        <button id="geoOff">Wyłącz GPS</button>
+      </div>
+    </div>
+    <div id="coordBox">
+      <div style="margin-bottom:6px"><b>Współrzędne punktu</b> <span class="muted">(zamiast klikania na mapie)</span></div>
+      <select id="cSys">
+        <option value="2000">PL-2000 (strefa z Y)</option>
+        <option value="1992">PL-1992</option>
+        <option value="wgs">WGS84 (szer., dł.)</option>
+      </select>
+      <div style="margin-top:6px;display:flex;gap:6px;align-items:center">
+        <label id="lblA">X</label><input type="text" id="cA" placeholder="5 860 000.00">
+        <label id="lblB">Y</label><input type="text" id="cB" placeholder="6 456 000.00">
+        <button id="cOk" class="primary">Użyj</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.11.0/proj4.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+"use strict";
+const $=s=>document.querySelector(s);
+const D2R=Math.PI/180, PT_M=0.0254/72; // 1 pt PDF w metrach na papierze
+const fmt=(v,d=2)=>v.toLocaleString('pl-PL',{minimumFractionDigits:d,maximumFractionDigits:d});
+const fmtXY=v=>v.toFixed(2);
+
+/* ---------- układy współrzędnych ---------- */
+proj4.defs('PL1992','+proj=tmerc +lat_0=0 +lon_0=19 +k=0.9993 +x_0=500000 +y_0=-5300000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs');
+for(const z of [5,6,7,8]) proj4.defs('PL2000_'+z,`+proj=tmerc +lat_0=0 +lon_0=${z*3} +k=0.999923 +x_0=${z*1e6+500000} +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs`);
+function toPL2000(lat,lon){const z=Math.min(8,Math.max(5,Math.round(lon/3)));const [E,N]=proj4('WGS84','PL2000_'+z,[lon,lat]);return {z,X:N,Y:E};}
+function toPL1992(lat,lon){const [E,N]=proj4('WGS84','PL1992',[lon,lat]);return {X:N,Y:E};}
+function fromPL2000(X,Y){const z=Math.floor(Y/1e6);if(z<5||z>8)return null;const [lon,lat]=proj4('PL2000_'+z,'WGS84',[Y,X]);return {lat,lng:lon};}
+function fromPL1992(X,Y){const [lon,lat]=proj4('PL1992','WGS84',[Y,X]);return {lat,lng:lon};}
+const num=s=>parseFloat(String(s).replace(/\s/g,'').replace(',','.'));
+
+/* ---------- stan ---------- */
+const S={file:null,fileName:'',page:1,res:2,k:2,src:null,ov:null,Wpt:0,Hpt:0,
+  pts:[],pins:[],fit:null,mode:null,pending:null,
+  lock:false,den:500,opacity:.8,cm:'dark',color:'#ffee00',white:true,showOv:true,
+  cursor:null,highlight:null};
+
+/* ---------- mapa ---------- */
+const map=L.map('map',{zoomAnimation:false,maxZoom:22,zoomSnap:0.5}).setView([52.1,19.2],6);
+const bases={
+  'ESRI World Imagery':L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:19,maxZoom:22,attribution:'Tiles &copy; Esri &mdash; Esri, Maxar, Earthstar Geographics, GIS User Community'}),
+  'Geoportal – ortofotomapa (WMS)':L.tileLayer.wms('https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/HighResolution',{layers:'Raster',format:'image/jpeg',version:'1.1.1',maxZoom:22,attribution:'&copy; GUGiK geoportal.gov.pl'}),
+  'OpenStreetMap':L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxNativeZoom:19,maxZoom:22,attribution:'&copy; OpenStreetMap'})
+};
+bases['ESRI World Imagery'].addTo(map);
+const labels=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:19,maxZoom:22});
+map.createPane('planPane');map.getPane('planPane').style.zIndex=450;map.getPane('planPane').style.pointerEvents='none';
+
+const PlanLayer=L.Layer.extend({
+  onAdd(m){this._c=L.DomUtil.create('canvas','');m.getPane('planPane').appendChild(this._c);m.on('move zoom viewreset resize zoomend moveend',this.redraw,this);this.redraw();},
+  onRemove(m){this._c.remove();m.off('move zoom viewreset resize zoomend moveend',this.redraw,this);},
+  redraw(){
+    const m=this._map;if(!m)return;const sz=m.getSize(),c=this._c,dpr=window.devicePixelRatio||1;
+    if(c.width!==Math.round(sz.x*dpr)||c.height!==Math.round(sz.y*dpr)){c.width=Math.round(sz.x*dpr);c.height=Math.round(sz.y*dpr);c.style.width=sz.x+'px';c.style.height=sz.y+'px';}
+    L.DomUtil.setPosition(c,m.containerPointToLayerPoint([0,0]));
+    const ctx=c.getContext('2d');ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,c.width,c.height);
+    if(!S.fit||!S.ov||!S.showOv)return;
+    const q=(x,y)=>m.latLngToContainerPoint(plan2ll(x,y));
+    const p0=q(0,0),p1=q(1000,0),p2=q(0,1000),k=S.k*1000;
+    ctx.setTransform((p1.x-p0.x)/k*dpr,(p1.y-p0.y)/k*dpr,(p2.x-p0.x)/k*dpr,(p2.y-p0.y)/k*dpr,p0.x*dpr,p0.y*dpr);
+    ctx.globalAlpha=S.opacity;ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+    ctx.drawImage(S.ov,0,0);
+  }
+});
+const planLayer=new PlanLayer().addTo(map);
+L.control.layers(bases,{'Nazwy i granice (ESRI)':labels},{position:'topright'}).addTo(map);
+L.control.scale({imperial:false}).addTo(map);
+const cpLayer=L.layerGroup().addTo(map), pinLayer=L.layerGroup().addTo(map);
+let tmpMarker=null;
+
+/* ---------- transformacja plan (pt) ↔ Web Mercator ---------- */
+const MER=L.Projection.SphericalMercator;
+const toM=(lat,lng)=>{const p=MER.project(L.latLng(lat,lng));return [p.x,p.y];};
+function plan2ll(x,y){const f=S.fit,u=x,v=-y;return MER.unproject(L.point(f.a*u-f.b*v+f.tx,f.b*u+f.a*v+f.ty));}
+function ll2plan(lat,lng){const f=S.fit,[X,Y]=toM(lat,lng),dx=X-f.tx,dy=Y-f.ty,d=f.a*f.a+f.b*f.b;return {x:(f.a*dx+f.b*dy)/d,y:-((-f.b*dx+f.a*dy)/d)};}
+
+function refit(){
+  const P=S.pts.filter(p=>p.lat!=null);
+  if(P.length<2){S.fit=null;P.forEach(p=>p.res=null);updateUI();return;}
+  const n=P.length,M=P.map(p=>toM(p.lat,p.lng)),U=P.map(p=>[p.x,-p.y]);
+  let um=0,vm=0,Xm=0,Ym=0;for(let i=0;i<n;i++){um+=U[i][0];vm+=U[i][1];Xm+=M[i][0];Ym+=M[i][1];}
+  um/=n;vm/=n;Xm/=n;Ym/=n;
+  let sxy=0,syx=0,suu=0;
+  for(let i=0;i<n;i++){const u=U[i][0]-um,v=U[i][1]-vm,X=M[i][0]-Xm,Y=M[i][1]-Ym;sxy+=u*X+v*Y;syx+=u*Y-v*X;suu+=u*u+v*v;}
+  const latC=P.reduce((s,p)=>s+p.lat,0)/n,kc=1/Math.cos(latC*D2R);
+  let a,b;
+  if(S.lock&&S.den>0){const s=S.den*PT_M*kc,th=Math.atan2(syx,sxy);a=s*Math.cos(th);b=s*Math.sin(th);}
+  else{a=sxy/suu;b=syx/suu;}
+  S.fit={a,b,tx:Xm-a*um+b*vm,ty:Ym-b*um-a*vm,kc};
+  let ss=0;
+  P.forEach((p,i)=>{const u=U[i][0],v=U[i][1],X=a*u-b*v+S.fit.tx,Y=b*u+a*v+S.fit.ty;p.res=Math.hypot(X-M[i][0],Y-M[i][1])/kc;ss+=p.res*p.res;});
+  S.fit.rms=n>2||S.lock?Math.sqrt(ss/n):null;
+  S.fit.mPerPt=Math.hypot(a,b)/kc;S.fit.den=S.fit.mPerPt/PT_M;S.fit.rot=Math.atan2(b,a)/D2R;S.fit.n=n;
+  updateUI();
+}
+
+/* ---------- PDF / obraz ---------- */
+const PDFJS_VER='3.11.174';
+let workerReady=null;
+function initWorker(){
+  if(workerReady)return workerReady;
+  const url=`https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VER}/pdf.worker.min.js`;
+  workerReady=fetch(url).then(r=>r.text()).then(t=>{pdfjsLib.GlobalWorkerOptions.workerSrc=URL.createObjectURL(new Blob([t],{type:'text/javascript'}));})
+    .catch(()=>{pdfjsLib.GlobalWorkerOptions.workerSrc=url;});
+  return workerReady;
+}
+async function loadFile(){
+  if(!S.file)return;
+  status('Wczytywanie planu…');
+  try{
+    let c;
+    if(/pdf$/i.test(S.file.type)||/\.pdf$/i.test(S.file.name)){
+      await initWorker();
+      const pdf=await pdfjsLib.getDocument({data:await S.file.arrayBuffer()}).promise;
+      S.page=Math.min(Math.max(1,S.page),pdf.numPages);$('#page').max=pdf.numPages;$('#page').value=S.page;
+      const page=await pdf.getPage(S.page);
+      const base=page.getViewport({scale:1});
+      let sc=S.res;const MAXD=30000,MAXA=90e6;
+      const f=Math.min(1,MAXD/(base.width*sc),MAXD/(base.height*sc),Math.sqrt(MAXA/(base.width*base.height*sc*sc)));
+      if(f<1)sc*=f;
+      const vp=page.getViewport({scale:sc});
+      c=document.createElement('canvas');c.width=Math.floor(vp.width);c.height=Math.floor(vp.height);
+      const ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);
+      status(`Renderowanie ${c.width}×${c.height} px…`);
+      await page.render({canvasContext:ctx,viewport:vp}).promise;
+      S.k=sc;S.Wpt=base.width;S.Hpt=base.height;
+      if(f<1)toast(`Plan duży – rozdzielczość ograniczona do ${sc.toFixed(2)}× (limit pamięci).`,4000);
+    }else{
+      const img=await createImageBitmap(S.file);
+      c=document.createElement('canvas');c.width=img.width;c.height=img.height;c.getContext('2d').drawImage(img,0,0);
+      S.k=1;S.Wpt=img.width;S.Hpt=img.height; // dla obrazów 1 „pt” = 1 px (blokada skali nie ma sensu)
+    }
+    S.src=c;processOverlay();
+    restoreState();
+    pvFit();
+    $('#planHint').style.display='none';
+    status(null);
+    if(!S.fit)toast('Plan wczytany. Dodaj punkty dopasowania: „+ Punkt dopasowania”.',4000);
+    else map.fitBounds(planBounds(),{padding:[30,30]});
+  }catch(e){console.error(e);status(null);toast('Nie udało się wczytać pliku: '+e.message,6000);}
+  updateUI();
+}
+function hexRGB(h){const n=parseInt(h.slice(1),16);return [(n>>16)&255,(n>>8)&255,n&255];}
+function processOverlay(){
+  if(!S.src)return;
+  const s=S.src,c=document.createElement('canvas');c.width=s.width;c.height=s.height;
+  const ctx=c.getContext('2d');ctx.drawImage(s,0,0);
+  if(S.cm!=='orig'||S.white){
+    const id=ctx.getImageData(0,0,c.width,c.height),d=id.data,[cr,cg,cb]=hexRGB(S.color),W=S.white,cm=S.cm;
+    for(let i=0;i<d.length;i+=4){
+      const r=d[i],g=d[i+1],b=d[i+2],mx=r>g?(r>b?r:b):(g>b?g:b),mn=r<g?(r<b?r:b):(g<b?g:b);
+      let al=255;
+      if(W){if(mn>=240){d[i+3]=0;continue;} if(mn>200&&mx-mn<25) al=Math.round((240-mn)/40*255);}
+      if(cm==='mono'){const lum=0.299*r+0.587*g+0.114*b;d[i]=cr;d[i+1]=cg;d[i+2]=cb;if(W)al=Math.min(al,Math.round(Math.min(255,(255-lum)*2.5)));}
+      else if(cm==='dark'&&mx-mn<45&&mx<170){d[i]=cr;d[i+1]=cg;d[i+2]=cb;}
+      d[i+3]=al;
+    }
+    ctx.putImageData(id,0,0);
+  }
+  S.ov=c;planLayer.redraw();pvDraw();
+}
+
+/* ---------- podgląd planu (lewy panel) ---------- */
+const PV={c:$('#plan'),s:1,ox:0,oy:0};
+function pvResize(){const r=$('#planWrap').getBoundingClientRect(),dpr=window.devicePixelRatio||1;PV.c.width=r.width*dpr;PV.c.height=r.height*dpr;PV.c.style.width=r.width+'px';PV.c.style.height=r.height+'px';pvDraw();}
+function pvFit(){const r=$('#planWrap').getBoundingClientRect();if(!S.Wpt)return;PV.s=Math.min(r.width/S.Wpt,r.height/S.Hpt)*0.95;PV.ox=(r.width-S.Wpt*PV.s)/2;PV.oy=(r.height-S.Hpt*PV.s)/2;pvDraw();}
+let pvRaf=0;
+function pvDraw(){if(pvRaf)return;pvRaf=requestAnimationFrame(()=>{pvRaf=0;pvPaint();});}
+function pvPaint(){
+  const ctx=PV.c.getContext('2d'),dpr=window.devicePixelRatio||1;
+  ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,PV.c.width,PV.c.height);
+  if(!S.src)return;
+  ctx.setTransform(dpr*PV.s/S.k,0,0,dpr*PV.s/S.k,dpr*PV.ox,dpr*PV.oy);
+  ctx.imageSmoothingEnabled=PV.s/S.k<1.5;ctx.drawImage(S.src,0,0);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  const scr=(x,y)=>[x*PV.s+PV.ox,y*PV.s+PV.oy];
+  S.pts.forEach((p,i)=>{const [X,Y]=scr(p.x,p.y);mark(ctx,X,Y,'#d6262b',String(i+1));});
+  if(S.pending){const [X,Y]=scr(S.pending.x,S.pending.y);mark(ctx,X,Y,'#f59e0b','?');}
+  S.pins.forEach(p=>{if(!S.fit)return;const q=ll2plan(p.lat,p.lng),[X,Y]=scr(q.x,q.y);ctx.fillStyle='#1f6feb';ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.beginPath();ctx.arc(X,Y,5,0,7);ctx.fill();ctx.stroke();});
+  if(S.cursor&&S.fit){const [X,Y]=scr(S.cursor.x,S.cursor.y);ctx.strokeStyle='#1f6feb';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(X-14,Y);ctx.lineTo(X+14,Y);ctx.moveTo(X,Y-14);ctx.lineTo(X,Y+14);ctx.stroke();ctx.beginPath();ctx.arc(X,Y,6,0,7);ctx.stroke();}
+  if(S.highlight){const [X,Y]=scr(S.highlight.x,S.highlight.y);ctx.strokeStyle='#16a34a';ctx.lineWidth=2.5;ctx.beginPath();ctx.arc(X,Y,10,0,7);ctx.stroke();}
+}
+function mark(ctx,X,Y,col,t){ctx.strokeStyle=col;ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(X-12,Y);ctx.lineTo(X+12,Y);ctx.moveTo(X,Y-12);ctx.lineTo(X,Y+12);ctx.stroke();ctx.fillStyle=col;ctx.beginPath();ctx.arc(X+12,Y-12,8,0,7);ctx.fill();ctx.fillStyle='#fff';ctx.font='bold 10px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(t,X+12,Y-12);}
+(function pvEvents(){
+  let drag=null;
+  PV.c.addEventListener('wheel',e=>{e.preventDefault();if(!S.src)return;const r=PV.c.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top,f=Math.exp(-e.deltaY*0.0015);
+    const ns=Math.min(Math.max(PV.s*f,0.01),60);PV.ox=mx-(mx-PV.ox)*ns/PV.s;PV.oy=my-(my-PV.oy)*ns/PV.s;PV.s=ns;pvDraw();},{passive:false});
+  PV.c.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY,ox:PV.ox,oy:PV.oy,moved:false};PV.c.setPointerCapture(e.pointerId);PV.c.style.cursor='grabbing';});
+  PV.c.addEventListener('pointermove',e=>{
+    if(drag){const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(Math.abs(dx)+Math.abs(dy)>4)drag.moved=true;if(drag.moved){PV.ox=drag.ox+dx;PV.oy=drag.oy+dy;pvDraw();}}
+  });
+  PV.c.addEventListener('pointerup',e=>{PV.c.style.cursor='grab';if(drag&&!drag.moved&&S.src){const r=PV.c.getBoundingClientRect();planClick((e.clientX-r.left-PV.ox)/PV.s,(e.clientY-r.top-PV.oy)/PV.s);}drag=null;});
+  new ResizeObserver(pvResize).observe($('#planWrap'));
+})();
+
+/* ---------- kliknięcia ---------- */
+function planClick(x,y){
+  if(x<0||y<0||x>S.Wpt||y>S.Hpt)return;
+  if(S.mode==='plan'){S.pending={x,y};setMode('map');pvDraw();return;}
+  if(!S.fit){if(!S.mode)toast('Najpierw dopasuj plan (min. 2 punkty).');return;}
+  const ll=plan2ll(x,y);
+  if(S.mode==='pin'){addPin(ll.lat,ll.lng);return;}
+  S.highlight={x,y};pvDraw();
+  if(tmpMarker)tmpMarker.remove();
+  tmpMarker=L.circleMarker(ll,{radius:7,color:'#16a34a',weight:3,fill:false}).addTo(map).bindPopup(coordHtml(ll.lat,ll.lng)).openPopup();
+  if(!map.getBounds().pad(-0.1).contains(ll))map.panTo(ll);
+}
+map.on('click',e=>{
+  let {lat,lng}=e.latlng;
+  const sn=(S.snap&&S.cads.length)?cadSnap(e.latlng):null;
+  if(sn){lat=sn.ll.lat;lng=sn.ll.lng;}
+  if(S.mode==='map'&&S.pending){addCP(S.pending.x,S.pending.y,lat,lng);if(sn)toast('Punkt przyciągnięty do rysunku DWG.');return;}
+  if(S.mode==='pin'){addPin(lat,lng,sn&&sn.ins?insName(sn.ins):undefined);return;}
+  if(S.mode==='plan'){toast('Najpierw kliknij punkt na PLANIE (lewy panel).');return;}
+  const hit=S.cads.length?cadHitInsert(e.latlng):null;
+  if(hit){L.popup().setLatLng(cadToLL(hit.cad,hit.n.x,hit.n.y)).setContent(cadCoordHtml(hit.cad,hit.n.x,hit.n.y,insHead(hit.n))).openOn(map);return;}
+  if(sn){L.popup().setLatLng([lat,lng]).setContent(cadCoordHtml(sn.cad,sn.x,sn.y,sn.ins?insHead(sn.ins):'<div class="muted" style="margin-bottom:4px">przyciągnięto do wierzchołka · '+esc(sn.cad.name)+'</div>')).openOn(map);}
+  else L.popup().setLatLng(e.latlng).setContent(coordHtml(lat,lng)).openOn(map);
+  if(S.fit){S.highlight=ll2plan(lat,lng);pvDraw();}
+});
+let mmRaf=0;
+map.on('mousemove',e=>{if(!S.fit)return;if(mmRaf)return;mmRaf=requestAnimationFrame(()=>{mmRaf=0;S.cursor=ll2plan(e.latlng.lat,e.latlng.lng);pvDraw();});});
+map.on('mouseout',()=>{S.cursor=null;pvDraw();});
+
+function coordHtml(lat,lng){
+  const p2=toPL2000(lat,lng),p9=toPL1992(lat,lng),g=`https://www.google.com/maps?q=${lat.toFixed(6)},${lng.toFixed(6)}`;
+  const txt=`${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+  return `<table><tr><td>WGS84</td><td><b>${txt}</b></td></tr>
+  <tr><td>PL-2000/${p2.z}</td><td>X ${fmtXY(p2.X)}  Y ${fmtXY(p2.Y)}</td></tr>
+  <tr><td>PL-1992</td><td>X ${fmtXY(p9.X)}  Y ${fmtXY(p9.Y)}</td></tr></table>
+  <div style="margin-top:6px;display:flex;gap:6px"><a href="${g}" target="_blank" rel="noopener">Google Maps</a>
+  <a href="#" onclick="copyText('${txt}');return false">kopiuj</a>
+  <a href="#" onclick="addPin(${lat},${lng});map.closePopup();return false">+ pinezka</a></div>`;
+}
+function copyText(t){try{navigator.clipboard.writeText(t).then(()=>toast('Skopiowano.'),()=>toast(t,6000));}catch(e){toast(t,6000);}}
+
+/* ---------- punkty dopasowania ---------- */
+function setMode(m){
+  S.mode=m;
+  $('#btnCP').classList.toggle('on',m==='plan'||m==='map');
+  $('#btnPin').classList.toggle('on',m==='pin');
+  $('#coordBox').style.display=m==='map'?'block':'none';
+  map.getContainer().style.cursor=(m==='map'||m==='pin')?'crosshair':'';
+  if(m==='plan')status('Kliknij punkt charakterystyczny na PLANIE (lewy panel). Esc – anuluj.');
+  else if(m==='map')status('Teraz kliknij TEN SAM punkt na MAPIE – albo wpisz jego współrzędne (lewy dolny róg). Esc – anuluj.');
+  else if(m==='pin')status('Pinezki: klikaj na planie albo mapie. Esc – koniec.');
+  else{status(null);S.pending=null;pvDraw();}
+}
+function addCP(x,y,lat,lng){S.pts.push({x,y,lat,lng,res:null});S.pending=null;setMode(null);refit();saveState();if(S.fit&&S.fit.n===2&&S.pts.length===2)map.fitBounds(planBounds(),{padding:[30,30]});}
+$('#btnCP').onclick=()=>{if(S.mode==='plan'||S.mode==='map')setMode(null);else setMode('plan');};
+$('#cSys').onchange=()=>{const w=$('#cSys').value==='wgs';$('#lblA').textContent=w?'szer.':'X';$('#lblB').textContent=w?'dł.':'Y';$('#cA').placeholder=w?'52.890000':'5 860 000.00';$('#cB').placeholder=w?'17.220000':'6 456 000.00';};
+$('#cOk').onclick=()=>{
+  const A=num($('#cA').value),B=num($('#cB').value),sys=$('#cSys').value;
+  if(!isFinite(A)||!isFinite(B)){toast('Wpisz obie współrzędne.');return;}
+  let ll=null;
+  if(sys==='wgs')ll={lat:A,lng:B};else if(sys==='1992')ll=fromPL1992(A,B);else ll=fromPL2000(A,B);
+  if(!ll||!isFinite(ll.lat)){toast('Niepoprawne współrzędne (PL-2000: Y zaczyna się od 5–8 mln, np. 6 456 000).',5000);return;}
+  if(S.pending)addCP(S.pending.x,S.pending.y,ll.lat,ll.lng);
+};
+document.addEventListener('keydown',e=>{if(e.key==='Escape')setMode(null);});
+
+function planBounds(){const c=[[0,0],[S.Wpt,0],[S.Wpt,S.Hpt],[0,S.Hpt]].map(([x,y])=>plan2ll(x,y));return L.latLngBounds(c);}
+
+/* ---------- pinezki ---------- */
+function addPin(lat,lng,name){S.pins.push({name:name||('P'+(S.pins.length+1)),lat,lng});saveState();updateUI();}
+function pinsKml(){
+  const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  return S.pins.map(p=>`<Placemark><name>${esc(p.name)}</name><Point><coordinates>${p.lng.toFixed(7)},${p.lat.toFixed(7)},0</coordinates></Point></Placemark>`).join('\n');
+}
+$('#pinKml').onclick=()=>download(baseName()+'_pinezki.kml',new Blob([`<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>${baseName()} – pinezki</name>\n${pinsKml()}\n</Document></kml>`],{type:'application/vnd.google-earth.kml+xml'}));
+$('#pinCsv').onclick=()=>{
+  const rows=['Nazwa;Szerokość;Długość;PL-2000 strefa;X;Y;Google Maps'];
+  S.pins.forEach(p=>{const q=toPL2000(p.lat,p.lng);rows.push([p.name,p.lat.toFixed(6),p.lng.toFixed(6),q.z,q.X.toFixed(2).replace('.',','),q.Y.toFixed(2).replace('.',','),`https://www.google.com/maps?q=${p.lat.toFixed(6)},${p.lng.toFixed(6)}`].join(';'));});
+  download(baseName()+'_pinezki.csv',new Blob(['﻿'+rows.join('\r\n')],{type:'text/csv'}));
+};
+$('#pinCopy').onclick=()=>copyText(S.pins.map(p=>`${p.name}\t${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}\thttps://www.google.com/maps?q=${p.lat.toFixed(6)},${p.lng.toFixed(6)}`).join('\n'));
+$('#pinClear').onclick=()=>{if(!S.pins.length)return;if($('#pinClear').dataset.arm){S.pins=[];delete $('#pinClear').dataset.arm;$('#pinClear').textContent='Usuń wszystkie';saveState();updateUI();}else{$('#pinClear').dataset.arm=1;$('#pinClear').textContent='Na pewno?';setTimeout(()=>{delete $('#pinClear').dataset.arm;$('#pinClear').textContent='Usuń wszystkie';},3000);}};
+$('#btnPin').onclick=()=>setMode(S.mode==='pin'?null:'pin');
+
+/* ---------- UI ---------- */
+function updateUI(){
+  const has=!!S.src;
+  $('#btnCP').disabled=!has;$('#btnPin').disabled=!S.fit&&!S.cads.length;$('#left').classList.toggle('nopdf',!S.src&&S.cads.length>0);$('#btnFitView').disabled=!S.fit;$('#btnKmz').disabled=!S.fit;$('#btnSave').disabled=!has;if(S.cads&&S.cads.length&&!S._cadRendered){S._cadRendered=true;}
+  ['#pinCsv','#pinKml','#pinCopy','#pinClear'].forEach(s=>$(s).disabled=!S.pins.length);
+  const fi=$('#fitInfo');
+  if(!S.fit)fi.innerHTML=has?`Brak dopasowania – potrzebne min. 2 punkty (masz ${S.pts.length}).`:'Brak dopasowania.';
+  else{
+    const f=S.fit,parts=[`<b>Dopasowano</b> (${f.n} pkt)`,`skala ≈ 1:${Math.round(f.den)}`,`obrót ${fmt(f.rot,1)}°`];
+    if(f.rms!=null)parts.push(`RMS ${fmt(f.rms,2)} m`);else parts.push('<span class="warn">przy 2 punktach brak kontroli błędu – dodaj 3. punkt</span>');
+    if(S.lock)parts.push('skala zablokowana');
+    fi.innerHTML=parts.join(' · ');
+  }
+  const tb=$('#cpTable tbody');tb.innerHTML='';
+  S.pts.forEach((p,i)=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td><b>${i+1}</b></td><td>${fmt(p.x,1)}; ${fmt(p.y,1)}</td><td>${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}</td><td>${p.res==null?'–':fmt(p.res,2)+' m'}</td><td><button data-a="go">pokaż</button> <button data-a="del">usuń</button></td>`;
+    if(p.res!=null&&S.fit&&S.fit.rms!=null&&p.res>Math.max(1,3*S.fit.rms))tr.querySelector('td:nth-child(4)').className='warn';
+    tr.querySelector('[data-a=del]').onclick=()=>{S.pts.splice(i,1);refit();saveState();};
+    tr.querySelector('[data-a=go]').onclick=()=>{map.setView([p.lat,p.lng],Math.max(map.getZoom(),19));S.highlight={x:p.x,y:p.y};const r=$('#planWrap').getBoundingClientRect();PV.ox=r.width/2-p.x*PV.s;PV.oy=r.height/2-p.y*PV.s;pvDraw();};
+    tb.appendChild(tr);
+  });
+  cpLayer.clearLayers();
+  S.pts.forEach((p,i)=>{
+    const m=L.marker([p.lat,p.lng],{draggable:true,icon:L.divIcon({className:'cp-icon',html:`<div>${i+1}</div>`,iconSize:[22,22],iconAnchor:[11,11]})}).addTo(cpLayer);
+    m.bindTooltip(`Punkt ${i+1} – przeciągnij, aby poprawić`);
+    m.on('dragend',()=>{const ll=m.getLatLng();p.lat=ll.lat;p.lng=ll.lng;refit();saveState();});
+  });
+  const pb=$('#pinTable tbody');pb.innerHTML='';pinLayer.clearLayers();
+  S.pins.forEach((p,i)=>{
+    const q=toPL2000(p.lat,p.lng),tr=document.createElement('tr');
+    tr.innerHTML=`<td><input value=""></td><td><a href="https://www.google.com/maps?q=${p.lat.toFixed(6)},${p.lng.toFixed(6)}" target="_blank" rel="noopener">${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}</a></td><td>${fmtXY(q.X)}; ${fmtXY(q.Y)}</td><td><button>usuń</button></td>`;
+    const inp=tr.querySelector('input');inp.value=p.name;inp.onchange=()=>{p.name=inp.value;saveState();mk.setTooltipContent(p.name);};
+    tr.querySelector('button').onclick=()=>{S.pins.splice(i,1);saveState();updateUI();};
+    pb.appendChild(tr);
+    const mk=L.marker([p.lat,p.lng],{draggable:true,icon:L.divIcon({className:'pin-icon',html:'<div></div>',iconSize:[20,20],iconAnchor:[10,20]})}).addTo(pinLayer);
+    mk.bindTooltip(p.name,{permanent:false,direction:'top',offset:[0,-18]});
+    mk.on('dragend',()=>{const ll=mk.getLatLng();p.lat=ll.lat;p.lng=ll.lng;saveState();updateUI();});
+    mk.on('click',()=>{mk.bindPopup(`<b>${p.name}</b><br>`+coordHtml(p.lat,p.lng)).openPopup();});
+  });
+  planLayer.redraw();pvDraw();
+}
+let stT=null;
+function status(t){const el=$('#status');if(!t){el.style.display='none';return;}el.textContent=t;el.style.display='block';clearTimeout(stT);}
+function toast(t,ms=2500){const el=$('#status');el.textContent=t;el.style.display='block';clearTimeout(stT);stT=setTimeout(()=>{if(S.mode)setMode(S.mode);else el.style.display='none';},ms);}
+function download(name,blob){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},2000);}
+function baseName(){return (S.fileName||'plan').replace(/\.[^.]+$/,'')+(S.page>1?`_str${S.page}`:'');}
+
+/* ---------- zapis / odczyt dopasowania ---------- */
+const stateKey=()=>`planGeoref:${S.fileName}:${S.page}`;
+function stateObj(){return {file:S.fileName,page:S.page,pts:S.pts.map(({x,y,lat,lng})=>({x,y,lat,lng})),pins:S.pins,lock:S.lock,den:S.den};}
+function saveState(){try{localStorage.setItem(stateKey(),JSON.stringify(stateObj()));}catch(e){}}
+function applyState(o){
+  S.pts=(o.pts||[]).map(p=>({...p,res:null}));S.pins=o.pins||[];
+  if('lock' in o){S.lock=!!o.lock;$('#lock').checked=S.lock;}if(o.den){S.den=o.den;$('#den').value=o.den;}
+  refit();
+}
+function restoreState(){S.pts=[];S.pins=[];S.fit=null;try{const t=localStorage.getItem(stateKey());if(t){applyState(JSON.parse(t));toast('Przywrócono zapisane dopasowanie tego planu.',3000);return;}}catch(e){}refit();}
+$('#btnSave').onclick=()=>download(baseName()+'_dopasowanie.json',new Blob([JSON.stringify(stateObj(),null,1)],{type:'application/json'}));
+$('#loadJson').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const o=JSON.parse(await f.text());applyState(o);saveState();if(S.fit)map.fitBounds(planBounds(),{padding:[30,30]});toast('Wczytano dopasowanie.');}catch(err){toast('Błędny plik dopasowania.');}e.target.value='';};
+
+/* ---------- eksport KMZ (Google Earth) ---------- */
+$('#btnKmz').onclick=async()=>{
+  if(!S.fit||!S.ov)return;
+  status('Przygotowuję KMZ…');
+  try{
+    let c=S.ov;const maxD=8192,f=Math.min(1,maxD/Math.max(c.width,c.height));
+    if(f<1){const c2=document.createElement('canvas');c2.width=Math.round(c.width*f);c2.height=Math.round(c.height*f);const x=c2.getContext('2d');x.imageSmoothingQuality='high';x.drawImage(c,0,0,c2.width,c2.height);c=c2;}
+    const ctr=plan2ll(S.Wpt/2,S.Hpt/2),wm=S.Wpt*S.fit.mPerPt,hm=S.Hpt*S.fit.mPerPt;
+    const dLat=(hm/2)/111132.95,dLon=(wm/2)/(111319.49*Math.cos(ctr.lat*D2R));
+    const alpha=Math.round(S.opacity*255).toString(16).padStart(2,'0');
+    const kml=`<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>${baseName()}</name>
+<GroundOverlay><name>${baseName()} – plan</name><color>${alpha}ffffff</color><Icon><href>plan.png</href></Icon>
+<LatLonBox><north>${(ctr.lat+dLat).toFixed(8)}</north><south>${(ctr.lat-dLat).toFixed(8)}</south><east>${(ctr.lng+dLon).toFixed(8)}</east><west>${(ctr.lng-dLon).toFixed(8)}</west><rotation>${S.fit.rot.toFixed(5)}</rotation></LatLonBox></GroundOverlay>
+${S.pins.length?'<Folder><name>Pinezki</name>\n'+pinsKml()+'\n</Folder>':''}
+</Document></kml>`;
+    const png=await new Promise(r=>c.toBlob(r,'image/png'));
+    const zip=new JSZip();zip.file('doc.kml',kml);zip.file('plan.png',png);
+    download(baseName()+'.kmz',await zip.generateAsync({type:'blob'}));
+    status(null);toast('Zapisano KMZ – otwórz w Google Earth.');
+  }catch(e){status(null);toast('Błąd eksportu: '+e.message,5000);}
+};
+
+/* ---------- wyszukiwanie ---------- */
+$('#search').addEventListener('keydown',async e=>{
+  if(e.key!=='Enter')return;const q=e.target.value.trim();if(!q)return;
+  const nums=q.replace(/(\d)\s+(?=\d{3}(\D|$))/g,'$1').match(/-?\d+(?:[.,]\d+)?/g);
+  if(nums&&nums.length===2){
+    const A=num(nums[0]),B=num(nums[1]);let ll=null;
+    if(Math.abs(A)<=90&&Math.abs(B)<=180)ll={lat:A,lng:B};
+    else if(B>=5e6&&B<9e6)ll=fromPL2000(A,B);
+    else if(A>1e5&&B>1e5)ll=fromPL1992(A,B);
+    if(ll){map.setView([ll.lat,ll.lng],18);L.popup().setLatLng([ll.lat,ll.lng]).setContent(coordHtml(ll.lat,ll.lng)).openOn(map);return;}
+  }
+  try{
+    const r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=pl&q='+encodeURIComponent(q));
+    const j=await r.json();if(!j.length){toast('Nie znaleziono.');return;}
+    map.setView([+j[0].lat,+j[0].lon],15);
+  }catch(err){toast('Wyszukiwarka niedostępna – wpisz współrzędne.');}
+});
+
+/* =====================================================================
+   DWG / DXF  (LibreDWG → WebAssembly, rysowanie wektorowe w PL-2000/1992)
+   ===================================================================== */
+const DWG_CDN='https://cdn.jsdelivr.net/npm/@mlightcad/libredwg-web@0.8.8';
+let DWGLIB=null;
+async function getDwgLib(){
+  if(DWGLIB)return DWGLIB;
+  status('Ładowanie czytnika DWG (ok. 11 MB, tylko za pierwszym razem)…');
+  const m=await import(DWG_CDN+'/dist/libredwg-web.js');
+  const inst=await m.LibreDwg.create(DWG_CDN+'/wasm');
+  DWGLIB={m,inst};return DWGLIB;
+}
+S.cads=[];S.cadMono=false;S.cadTxt=true;S.snap=true;
+const CAD_SYS={'2000_5':'PL-2000 strefa 5','2000_6':'PL-2000 strefa 6','2000_7':'PL-2000 strefa 7','2000_8':'PL-2000 strefa 8','1992':'PL-1992'};
+function cadToLL(cad,x,y){const E=x+cad.ox,N=y+cad.oy;const def=cad.sys==='1992'?'PL1992':'PL2000_'+cad.sys.split('_')[1];const [lon,lat]=proj4(def,'WGS84',[E,N]);return {lat,lng:lon};}
+function llToCad(cad,lat,lng){const def=cad.sys==='1992'?'PL1992':'PL2000_'+cad.sys.split('_')[1];const [E,N]=proj4('WGS84',def,[lng,lat]);return {x:E-cad.ox,y:N-cad.oy};}
+function detectSys(x,y){
+  if(x>=5e6&&x<9e6&&y>5.3e6&&y<6.2e6)return '2000_'+Math.floor(x/1e6);
+  if(x>1e5&&x<9e5&&y>1e5&&y<8e5)return '1992';
+  return null;
+}
+const rgbCss=c=>'#'+((c>>>0)&0xffffff).toString(16).padStart(6,'0');
+function cleanMtext(s){
+  return String(s||'').replace(/\\P/g,'\n').replace(/\\[ACcFfHhQqTtWw][^;]*;/g,'').replace(/\\[LlOoKk]/g,'').replace(/\\S([^;]*)[\^#\/]([^;]*);/g,'$1/$2')
+    .replace(/%%[cC]/g,'Ø').replace(/%%[dD]/g,'°').replace(/%%[pP]/g,'±').replace(/[{}]/g,'').replace(/\\\\/g,'\\');
+}
+function txtOf(t){return typeof t==='string'?t:(t&&typeof t.text==='string'?t.text:'');}
+
+/* --- spłaszczenie rysunku do prymitywów --- */
+function flattenCad(db,name){
+  const BR=db.tables.BLOCK_RECORD.entries,blocks=new Map(BR.map(b=>[b.name,b]));
+  const ms=BR.find(b=>/^\*model_space$/i.test(b.name));const msH=ms?ms.handle:null;
+  const LI=new Map(db.tables.LAYER.entries.map(l=>[l.name,l]));
+  const cad={name,ox:null,oy:null,groups:new Map(),texts:[],inserts:[],verts:[],vlay:[],layers:new Map(),bbox:[1e18,1e18,-1e18,-1e18],sys:null};
+  const lay=n=>{let L=cad.layers.get(n);if(!L){const li=LI.get(n)||{};L={name:n,on:!(li.off||li.frozen)&&n.toLowerCase()!=='defpoints',n:0,color:li.color!=null&&li.color>=0?li.color:0xffffff,idx:cad.layers.size};cad.layers.set(n,L);}return L;};
+  const org=(x,y)=>{if(cad.ox===null){cad.ox=Math.round(x/1000)*1000;cad.oy=Math.round(y/1000)*1000;}};
+  const ap=(M,x,y)=>[M[0]*x+M[2]*y+M[4],M[1]*x+M[3]*y+M[5]];
+  const mul=(A,B)=>[A[0]*B[0]+A[2]*B[1],A[1]*B[0]+A[3]*B[1],A[0]*B[2]+A[2]*B[3],A[1]*B[2]+A[3]*B[3],A[0]*B[4]+A[2]*B[5]+A[4],A[1]*B[4]+A[3]*B[5]+A[5]];
+  function poly(L,col,pts,M,closed,vertsToo){
+    if(pts.length<2)return;const out=new Float64Array(pts.length*2+(closed?2:0));
+    for(let i=0;i<pts.length;i++){const [X,Y]=ap(M,pts[i][0],pts[i][1]);org(X,Y);out[2*i]=X-cad.ox;out[2*i+1]=Y-cad.oy;
+      if(X<cad.bbox[0])cad.bbox[0]=X;if(Y<cad.bbox[1])cad.bbox[1]=Y;if(X>cad.bbox[2])cad.bbox[2]=X;if(Y>cad.bbox[3])cad.bbox[3]=Y;}
+    if(closed){out[out.length-2]=out[0];out[out.length-1]=out[1];}
+    const key=L.name+'\u0001'+col;let g=cad.groups.get(key);if(!g){g={layer:L,color:col,polys:[]};cad.groups.set(key,g);}g.polys.push(out);L.n++;
+    if(vertsToo)for(const i of vertsToo){cad.verts.push(out[2*i],out[2*i+1]);cad.vlay.push(L.idx);}
+  }
+  function arcPts(cx,cy,r,a0,a1,ocsFlip){
+    if(a1<a0)a1+=2*Math.PI;const n=Math.max(8,Math.min(128,Math.ceil((a1-a0)/(Math.PI/24))));const p=[];
+    for(let i=0;i<=n;i++){const t=a0+(a1-a0)*i/n;p.push([cx+r*Math.cos(t),cy+r*Math.sin(t)]);}
+    if(ocsFlip)p.forEach(q=>q[0]=-q[0]);return p;
+  }
+  function bulgePts(vs,closed,flip){
+    const p=[],n=vs.length;
+    for(let i=0;i<n;i++){
+      const a=vs[i];p.push([a.x,a.y]);
+      if(!(i<n-1||closed)||!a.bulge)continue;
+      const b=vs[(i+1)%n],dx=b.x-a.x,dy=b.y-a.y,c=Math.hypot(dx,dy);if(c<1e-12)continue;
+      const bu=a.bulge,th=4*Math.atan(bu),k=(c/2)*((1-bu*bu)/(2*bu));
+      const cx=(a.x+b.x)/2-dy/c*k,cy=(a.y+b.y)/2+dx/c*k,R=Math.hypot(a.x-cx,a.y-cy),s=Math.atan2(a.y-cy,a.x-cx);
+      const m=Math.max(4,Math.ceil(Math.abs(th)/(Math.PI/24)));
+      for(let j=1;j<m;j++){const t=s+th*j/m;p.push([cx+R*Math.cos(t),cy+R*Math.sin(t)]);}
+    }
+    if(flip)p.forEach(q=>q[0]=-q[0]);return p;
+  }
+  function addText(L,col,M,x,y,h,rot,str,ha,va,xs){
+    if(!str||!h)return;const [X,Y]=ap(M,x,y);org(X,Y);
+    const sx=Math.hypot(M[0],M[1]),r=rot+Math.atan2(M[1],M[0]);
+    cad.texts.push({L,col,x:X-cad.ox,y:Y-cad.oy,h:h*sx,rot:r,s:str,ha:ha||0,va:va||0,xs:xs||1});
+  }
+  function colorOf(e,L,par){
+    const ci=e.colorIndex;
+    if(ci===256||ci==null)return L.color;
+    if(ci===0)return par?par.color:L.color;
+    if(e.color!=null&&e.color>=0)return e.color;
+    return L.color;
+  }
+  function emit(e,M,par,depth){
+    if(e.isVisible===false)return;
+    const ln=(e.layer==='0'&&par)?par.layer:e.layer;const L=lay(ln);const col=colorOf(e,L,par);
+    const ez=e.extrusionDirection&&e.extrusionDirection.z<0;
+    switch(e.type){
+      case 'LINE':poly(L,col,[[e.startPoint.x,e.startPoint.y],[e.endPoint.x,e.endPoint.y]],M,false,[0,1]);break;
+      case 'LWPOLYLINE':case 'POLYLINE2D':case 'POLYLINE3D':case 'POLYLINE':{
+        const vs=e.vertices||[];if(vs.length<2)break;const closed=!!(e.flag&1)||!!e.closed;
+        const p=vs.some(v=>v.bulge)?bulgePts(vs,closed,ez):vs.map(v=>[ez?-v.x:v.x,v.y]);
+        // wierzchołki do przyciągania = oryginalne wierzchołki
+        const idx=[];if(!vs.some(v=>v.bulge))for(let i=0;i<p.length;i++)idx.push(i);
+        poly(L,col,p,M,closed,idx);
+        if(vs.some(v=>v.bulge))for(const v of vs){const [X,Y]=ap(M,ez?-v.x:v.x,v.y);cad.verts.push(X-cad.ox,Y-cad.oy);cad.vlay.push(L.idx);}
+        break;}
+      case 'CIRCLE':{const c=e.center;poly(L,col,arcPts(c.x,c.y,e.radius,0,2*Math.PI,ez),M,false);const [X,Y]=ap(M,ez?-c.x:c.x,c.y);org(X,Y);cad.verts.push(X-cad.ox,Y-cad.oy);cad.vlay.push(L.idx);break;}
+      case 'ARC':{const c=e.center;poly(L,col,arcPts(c.x,c.y,e.radius,e.startAngle,e.endAngle,ez),M,false);break;}
+      case 'ELLIPSE':{const c=e.center,mj=e.majorAxisEndPoint,rt=e.axisRatio||1,s=ez?-1:1;
+        const mn=[-mj.y*rt*s,mj.x*rt*s];let a0=e.startAngle||0,a1=e.endAngle==null?2*Math.PI:e.endAngle;if(a1<=a0)a1+=2*Math.PI;
+        const n=Math.max(16,Math.ceil((a1-a0)/(Math.PI/32))),p=[];for(let i=0;i<=n;i++){const t=a0+(a1-a0)*i/n;p.push([c.x+mj.x*Math.cos(t)+mn[0]*Math.sin(t),c.y+mj.y*Math.cos(t)+mn[1]*Math.sin(t)]);}
+        poly(L,col,p,M,false);break;}
+      case 'SPLINE':{const pts=(e.fitPoints&&e.fitPoints.length>1?e.fitPoints:e.controlPoints)||[];poly(L,col,pts.map(p=>[p.x,p.y]),M,false);break;}
+      case 'SOLID':case 'TRACE':{const c=[e.corner1||e.points&&e.points[0],e.corner2,e.corner4,e.corner3].filter(Boolean);if(c.length>2)poly(L,col,c.map(p=>[p.x,p.y]),M,true);break;}
+      case 'TEXT':{const p=(e.halign||e.valign)&&e.endPoint&&(e.endPoint.x||e.endPoint.y)?e.endPoint:e.startPoint;
+        addText(L,col,M,ez?-p.x:p.x,p.y,e.textHeight,e.rotation||0,e.text,e.halign,e.valign,e.xScale);break;}
+      case 'MTEXT':{const p=e.insertionPoint,rot=e.direction&&(e.direction.x||e.direction.y)?Math.atan2(e.direction.y,e.direction.x):(e.rotation||0);
+        const a=(e.attachmentPoint||1)-1;addText(L,col,M,p.x,p.y,e.textHeight,rot,cleanMtext(e.text),[0,1,2][a%3],-(1+Math.floor(a/3)),1);break;}
+      case 'MULTILEADER':{
+        for(const s of e.leaderSections||[])for(const ll of s.leaderLines||[]){const v=(ll.vertices||[]).map(p=>[p.x,p.y]);if(s.lastLeaderLinePoint)v.push([s.lastLeaderLinePoint.x,s.lastLeaderLinePoint.y]);poly(L,col,v,M,false);}
+        if(e.textContent&&e.textAnchor){const d=e.textDirection;addText(L,col,M,e.textAnchor.x,e.textAnchor.y,e.textHeight||2.5,d?Math.atan2(d.y,d.x):(e.textRotation||0),cleanMtext(e.textContent),0,-1,1);}
+        break;}
+      case 'DIMENSION':{const b=blocks.get(e.name);if(b&&depth<8)for(const c of b.entities||[])emit(c,M,{layer:ln,color:col},depth+1);break;}
+      case 'INSERT':{
+        const b=blocks.get(e.name);const ip=e.insertionPoint;
+        if(depth===0){const [X,Y]=ap(M,ip.x,ip.y);org(X,Y);
+          cad.inserts.push({L,block:e.name,attrs:(e.attribs||[]).map(a=>({tag:a.tag||(a.text&&a.text.tag)||'',v:txtOf(a.text)})).filter(a=>a.v!==''),x:X-cad.ox,y:Y-cad.oy});
+          cad.verts.push(X-cad.ox,Y-cad.oy);cad.vlay.push(L.idx);}
+        if(b&&depth<8&&(b.entities||[]).length){
+          const bp=b.basePoint||{x:0,y:0},r=e.rotation||0,sx=e.xScale||1,sy=e.yScale||1,c=Math.cos(r),s=Math.sin(r);
+          let Mi=mul(M,[c,s,-s,c,ip.x,ip.y]);Mi=mul(Mi,[sx,0,0,sy,0,0]);Mi=mul(Mi,[1,0,0,1,-bp.x,-bp.y]);
+          if(ez)Mi=mul(Mi,[-1,0,0,1,0,0]);
+          for(const ch of b.entities)if(ch.type!=='ATTDEF')emit(ch,Mi,{layer:ln,color:col},depth+1);
+        }
+        for(const a of e.attribs||[]){const t=a.text;if(!t||typeof t!=='object'||a.isVisible===false)continue;
+          const p=(t.halign||t.valign)&&t.endPoint&&(t.endPoint.x||t.endPoint.y)?t.endPoint:t.startPoint;
+          const AL=lay((a.layer==='0')?ln:a.layer);addText(AL,colorOf(a,AL,{color:col}),M,p.x,p.y,t.textHeight,t.rotation||0,t.text,t.halign,t.valign,t.xScale);}
+        break;}
+      default:break;
+    }
+  }
+  const I=[1,0,0,1,0,0];
+  // punkt odniesienia = mediana współrzędnych elementów (precyzja rysowania przy dużych współrzędnych)
+  {const xs=[],ys=[];for(const e of db.entities){if(e.ownerBlockRecordSoftId!==msH)continue;const q=e.insertionPoint||e.startPoint||e.center||(e.vertices&&e.vertices[0]);if(q&&isFinite(q.x)&&(Math.abs(q.x)>1||Math.abs(q.y)>1)){xs.push(q.x);ys.push(q.y);}}
+   if(xs.length){xs.sort((a,b)=>a-b);ys.sort((a,b)=>a-b);cad.ox=Math.round(xs[xs.length>>1]/1000)*1000;cad.oy=Math.round(ys[ys.length>>1]/1000)*1000;}}
+  for(const e of db.entities)if(e.ownerBlockRecordSoftId===msH)emit(e,I,null,0);
+  // Path2D na grupę
+  for(const g of cad.groups.values()){const P=new Path2D();for(const a of g.polys){P.moveTo(a[0],a[1]);for(let i=2;i<a.length;i+=2)P.lineTo(a[i],a[i+1]);}g.path=P;g.css=rgbCss(g.color);g.n=g.polys.length;delete g.polys;}
+  // siatka do przyciągania
+  const V=cad.verts;cad.V=new Float64Array(V);cad.VL=new Int32Array(cad.vlay);delete cad.verts;delete cad.vlay;
+  cad.grid=new Map();const cs=cad.cell=2;for(let i=0;i<cad.V.length;i+=2){const k=Math.floor(cad.V[i]/cs)+','+Math.floor(cad.V[i+1]/cs);let a=cad.grid.get(k);if(!a)cad.grid.set(k,a=[]);a.push(i);}
+  cad.layerArr=[...cad.layers.values()];
+  cad.texts.forEach(t=>t.css=rgbCss(t.col));
+  const cx=(cad.bbox[0]+cad.bbox[2])/2,cy=(cad.bbox[1]+cad.bbox[3])/2;
+  // układ: mediana wstawień/wierzchołków (odporna na pojedyncze śmieci)
+  const sx=[],sy=[];for(let i=0;i<cad.V.length&&sx.length<2000;i+=Math.max(2,2*Math.floor(cad.V.length/4000))){sx.push(cad.V[i]+cad.ox);sy.push(cad.V[i+1]+cad.oy);}
+  sx.sort((a,b)=>a-b);sy.sort((a,b)=>a-b);cad.sys=sx.length?detectSys(sx[sx.length>>1],sy[sy.length>>1]):detectSys(cx,cy);
+  cad.med=[sx[sx.length>>1]-cad.ox,sy[sy.length>>1]-cad.oy];
+  // zasięg „właściwy” (2–98 percentyl) – bez odległych śmieci
+  const q=(a,f)=>a[Math.min(a.length-1,Math.max(0,Math.floor(a.length*f)))];
+  cad.ext=sx.length?[q(sx,.02)-cad.ox,q(sy,.02)-cad.oy,q(sx,.98)-cad.ox,q(sy,.98)-cad.oy]:[0,0,0,0];
+  return cad;
+}
+
+async function loadCad(file){
+  try{
+    const {m,inst}=await getDwgLib();
+    status('Czytanie '+file.name+'…');await new Promise(r=>setTimeout(r,30));
+    const buf=new Uint8Array(await file.arrayBuffer());
+    const isDxf=/\.dxf$/i.test(file.name);
+    const t0=performance.now();
+    const ptr=inst.dwg_read_data(buf,isDxf?m.Dwg_File_Type.DXF:m.Dwg_File_Type.DWG);
+    if(ptr==null)throw new Error('LibreDWG nie odczytał pliku');
+    const db=inst.convert(ptr);try{inst.dwg_free(ptr);}catch(e){}
+    status('Przygotowanie rysunku…');await new Promise(r=>setTimeout(r,30));
+    const cad=flattenCad(db,file.name);
+    cad.ms=Math.round(performance.now()-t0);
+    if(!cad.groups.size&&!cad.texts.length)throw new Error('rysunek jest pusty (model space)');
+    S.cads.push(cad);status(null);
+    if(!cad.sys)toast('Rysunek nie jest w PL-2000 ani PL-1992 (współrzędne lokalne). Wydrukuj go do PDF i dopasuj punktami.',8000);
+    else{toast(`${file.name}: ${CAD_SYS[cad.sys]} – ${cad.inserts.length} bloków, ${cad.layerArr.length} warstw.`,4000);if(!GEO.last)cadFit(cad);}
+    showTab('tabLayers');renderLayers();renderElems();updateUI();cadLayer.redraw();if(GEO.last)geoInfo();
+  }catch(e){console.error(e);status(null);toast('Nie udało się odczytać '+file.name+': '+e.message+'. Spróbuj zapisać rysunek jako DXF (np. 2013) i wczytać DXF.',9000);}
+}
+function cadBounds(cad){const e=cad.ext;return L.latLngBounds([cadToLL(cad,e[0],e[1]),cadToLL(cad,e[2],e[3]),cadToLL(cad,e[0],e[3]),cadToLL(cad,e[2],e[1])]);}
+function cadFit(cad){if(cad.sys)map.fitBounds(cadBounds(cad),{padding:[20,20]});}
+function cadAffine(cad,m){
+  const c=m.getCenter(),r=llToCad(cad,c.lat,c.lng);
+  const P=(x,y)=>m.latLngToContainerPoint(cadToLL(cad,x,y));
+  const p0=P(r.x,r.y),p1=P(r.x+100,r.y),p2=P(r.x,r.y+100);
+  const a=(p1.x-p0.x)/100,b=(p1.y-p0.y)/100,cc=(p2.x-p0.x)/100,d=(p2.y-p0.y)/100;
+  return [a,b,cc,d,p0.x-a*r.x-cc*r.y,p0.y-b*r.x-d*r.y];
+}
+const CadLayer=L.Layer.extend({
+  onAdd(m){this._c=L.DomUtil.create('canvas','');m.getPane('cadPane').appendChild(this._c);m.on('move zoom viewreset resize zoomend moveend',this.redraw,this);this.redraw();},
+  onRemove(m){this._c.remove();m.off('move zoom viewreset resize zoomend moveend',this.redraw,this);},
+  redraw(){
+    const m=this._map;if(!m)return;const sz=m.getSize(),c=this._c,dpr=window.devicePixelRatio||1;
+    if(c.width!==Math.round(sz.x*dpr)||c.height!==Math.round(sz.y*dpr)){c.width=Math.round(sz.x*dpr);c.height=Math.round(sz.y*dpr);c.style.width=sz.x+'px';c.style.height=sz.y+'px';}
+    L.DomUtil.setPosition(c,m.containerPointToLayerPoint([0,0]));
+    const ctx=c.getContext('2d');ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,c.width,c.height);
+    ctx.globalAlpha=S.opacity;ctx.lineJoin='round';ctx.lineCap='round';
+    for(const cad of S.cads){
+      if(!cad.sys||cad.hidden)continue;
+      const A=cadAffine(cad,m),sc=Math.sqrt(Math.abs(A[0]*A[3]-A[1]*A[2]));cad.A=A;cad.sc=sc;
+      ctx.setTransform(A[0]*dpr,A[1]*dpr,A[2]*dpr,A[3]*dpr,A[4]*dpr,A[5]*dpr);
+      ctx.lineWidth=Math.max(1,(S.cadLw||1.3))/sc;
+      for(const g of cad.groups.values()){if(!g.layer.on)continue;ctx.strokeStyle=S.cadMono?S.color:g.css;ctx.stroke(g.path);}
+      if(S.cadTxt){
+        const W=sz.x,H=sz.y;ctx.textBaseline='alphabetic';
+        for(const t of cad.texts){
+          if(!t.L.on)continue;const ph=t.h*sc;if(ph<4)continue;
+          const X=A[0]*t.x+A[2]*t.y+A[4],Y=A[1]*t.x+A[3]*t.y+A[5];if(X<-400||Y<-400||X>W+400||Y>H+400)continue;
+          ctx.setTransform(A[0]*dpr,A[1]*dpr,A[2]*dpr,A[3]*dpr,A[4]*dpr,A[5]*dpr);
+          ctx.translate(t.x,t.y);ctx.rotate(t.rot);ctx.scale(t.h/10*t.xs,-t.h/10);
+          ctx.fillStyle=S.cadMono?S.color:t.css;ctx.font='10px Arial, sans-serif';
+          ctx.textAlign=t.ha===1||t.ha===4?'center':t.ha===2?'right':'left';
+          const lines=t.s.split('\n');
+          if(t.va<0){ // MTEXT: -1 góra, -2 środek, -3 dół
+            const tot=lines.length*16.7,off=t.va===-1?10:t.va===-2?10-tot/2:10-tot;
+            lines.forEach((ln,i)=>ctx.fillText(ln,0,off+i*16.7));
+          }else{
+            const off=t.va===3?10:t.va===2?5:t.va===1?0:0;ctx.fillText(lines[0],0,off);
+          }
+        }
+      }
+    }
+  }
+});
+map.createPane('cadPane');map.getPane('cadPane').style.zIndex=440;map.getPane('cadPane').style.pointerEvents='none';
+const cadLayer=new CadLayer().addTo(map);
+
+/* --- przyciąganie i trafienia --- */
+function cadSnap(latlng){
+  let best=null;
+  for(const cad of S.cads){
+    if(!cad.sys||cad.hidden||!cad.A)continue;
+    const p=llToCad(cad,latlng.lat,latlng.lng),tol=12/cad.sc,cs=cad.cell,r=Math.ceil(tol/cs);
+    const ix=Math.floor(p.x/cs),iy=Math.floor(p.y/cs);
+    if(r>60)continue; // za mało zbliżone
+    for(let gx=ix-r;gx<=ix+r;gx++)for(let gy=iy-r;gy<=iy+r;gy++){const a=cad.grid.get(gx+','+gy);if(!a)continue;
+      for(const i of a){if(!cad.layerArr[cad.VL[i>>1]].on)continue;const d=Math.hypot(cad.V[i]-p.x,cad.V[i+1]-p.y);if(d<=tol&&(!best||d/cad.sc<best.dpx)){best={cad,x:cad.V[i],y:cad.V[i+1],dpx:d*cad.sc,d};}}}
+  }
+  if(!best)return null;
+  const ins=best.cad.inserts.find(n=>Math.abs(n.x-best.x)<1e-6&&Math.abs(n.y-best.y)<1e-6&&n.L.on);
+  best.ins=ins||null;best.ll=cadToLL(best.cad,best.x,best.y);return best;
+}
+function cadHitInsert(latlng){
+  let best=null;
+  for(const cad of S.cads){if(!cad.sys||cad.hidden||!cad.A)continue;const p=llToCad(cad,latlng.lat,latlng.lng),tol=16/cad.sc;
+    for(const n of cad.inserts){if(!n.L.on||!n.attrs.length)continue;const d=Math.hypot(n.x-p.x,n.y-p.y);if(d<=tol&&(!best||d<best.d))best={cad,n,d};}}
+  return best;
+}
+function cadCoordHtml(cad,x,y,head){
+  const ll=cadToLL(cad,x,y),E=x+cad.ox,N=y+cad.oy;
+  return (head||'')+`<table><tr><td>${CAD_SYS[cad.sys]}</td><td><b>X ${fmtXY(N)}  Y ${fmtXY(E)}</b></td></tr><tr><td colspan=2 class="muted" style="font-size:11px">dokładnie z rysunku (X=N, Y=E)</td></tr></table>`+coordHtml(ll.lat,ll.lng);
+}
+function insName(n){return n.attrs.map(a=>a.v).join(' / ')||n.block;}
+function insHead(n){return `<div style="margin-bottom:4px"><b>${esc(insName(n))}</b><br><span class="muted">${esc(n.L.name)} · blok ${esc(n.block)}</span>`+(n.attrs.length>1?'<br>'+n.attrs.map(a=>esc(a.tag)+': '+esc(a.v)).join('<br>'):'')+'</div>';}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+/* --- panele: warstwy i elementy --- */
+function showTab(id){document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('sel',b.dataset.t===id));document.querySelectorAll('.tab').forEach(t=>t.style.display=t.id===id?'block':'none');}
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>showTab(b.dataset.t));
+function renderLayers(){
+  const box=$('#layerList');box.innerHTML='';
+  if(!S.cads.length){box.innerHTML='<div class="muted">Wczytaj plik DWG lub DXF (można kilka, np. projekt + mapa do celów projektowych).</div>';return;}
+  const f=($('#layFilter').value||'').toLowerCase();
+  S.cads.forEach((cad,ci)=>{
+    const h=document.createElement('div');h.className='cadhead';
+    h.innerHTML=`<label><input type="checkbox" ${cad.hidden?'':'checked'} data-a="vis"> <b>${esc(cad.name)}</b></label>
+      <select data-a="sys">${Object.entries(CAD_SYS).map(([k,v])=>`<option value="${k}" ${k===cad.sys?'selected':''}>${v}</option>`).join('')}${cad.sys?'':'<option selected value="">– nieznany –</option>'}</select>
+      <button data-a="fit">pokaż</button> <button data-a="all">wszystkie</button> <button data-a="none">żadna</button> <button data-a="del">usuń</button>
+      <div class="muted" style="font-size:11px">${cad.layerArr.length} warstw · ${cad.inserts.length} bloków · ${cad.texts.length} opisów · odczyt ${cad.ms} ms</div>`;
+    h.querySelector('[data-a=vis]').onchange=e=>{cad.hidden=!e.target.checked;cadLayer.redraw();};
+    h.querySelector('[data-a=sys]').onchange=e=>{cad.sys=e.target.value||null;cadLayer.redraw();cadFit(cad);renderElems();};
+    h.querySelector('[data-a=fit]').onclick=()=>cadFit(cad);
+    h.querySelector('[data-a=all]').onclick=()=>{cad.layerArr.forEach(l=>{if(!f||l.name.toLowerCase().includes(f))l.on=true});renderLayers();cadLayer.redraw();};
+    h.querySelector('[data-a=none]').onclick=()=>{cad.layerArr.forEach(l=>{if(!f||l.name.toLowerCase().includes(f))l.on=false});renderLayers();cadLayer.redraw();};
+    h.querySelector('[data-a=del]').onclick=()=>{S.cads.splice(ci,1);renderLayers();renderElems();cadLayer.redraw();updateUI();};
+    box.appendChild(h);
+    const used=cad.layerArr.filter(l=>l.n>0||cad.texts.some(t=>t.L===l)).filter(l=>!f||l.name.toLowerCase().includes(f)).sort((a,b)=>a.name.localeCompare(b.name,'pl'));
+    const ul=document.createElement('div');ul.className='laylist';
+    for(const l of used){const r=document.createElement('label');r.className='layrow';
+      const nm=l.name.includes('|')?`<span class="muted">${esc(l.name.split('|')[0])} |</span> ${esc(l.name.split('|').slice(1).join('|'))}`:esc(l.name);
+      r.innerHTML=`<input type="checkbox" ${l.on?'checked':''}><span class="sw" style="background:${rgbCss(l.color)}"></span><span class="ln">${nm}</span><span class="muted">${l.n}</span>`;
+      r.querySelector('input').onchange=e=>{l.on=e.target.checked;cadLayer.redraw();renderElems();if(GEO.last)geoInfo();};ul.appendChild(r);}
+    box.appendChild(ul);
+  });
+}
+$('#layFilter').oninput=renderLayers;
+function elemRows(){
+  const lf=$('#elLayer').value,q=($('#elSearch').value||'').toLowerCase(),onlyA=$('#elAttr').checked,rows=[];
+  for(const cad of S.cads){if(!cad.sys)continue;for(const n of cad.inserts){
+    if(onlyA&&!n.attrs.length)continue;if(lf&&n.L.name!==lf)continue;
+    const nm=insName(n);if(q&&!(nm.toLowerCase().includes(q)||n.block.toLowerCase().includes(q)))continue;rows.push({cad,n,nm});}}
+  return rows;
+}
+function renderElems(){
+  const sel=$('#elLayer'),cur=sel.value,ls=new Map();
+  for(const cad of S.cads)for(const n of cad.inserts)if(!$('#elAttr').checked||n.attrs.length)ls.set(n.L.name,(ls.get(n.L.name)||0)+1);
+  sel.innerHTML='<option value="">wszystkie warstwy</option>'+[...ls.entries()].sort((a,b)=>a[0].localeCompare(b[0],'pl')).map(([k,v])=>`<option value="${esc(k)}">${esc(k)} (${v})</option>`).join('');
+  if([...ls.keys()].includes(cur))sel.value=cur;
+  const rows=elemRows(),tb=$('#elTable tbody');tb.innerHTML='';
+  $('#elCount').textContent=rows.length?`${rows.length} elementów`:'';
+  ['#elCsv','#elKml','#elPins'].forEach(s=>$(s).disabled=!rows.length);
+  rows.slice(0,800).forEach(({cad,n,nm})=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td><a href="#">${esc(nm)}</a></td><td class="muted">${esc(n.L.name)}</td><td>${fmtXY(n.y+cad.oy)}</td><td>${fmtXY(n.x+cad.ox)}</td>`;
+    tr.querySelector('a').onclick=ev=>{ev.preventDefault();const ll=cadToLL(cad,n.x,n.y);map.setView(ll,Math.max(map.getZoom(),19));
+      if(tmpMarker)tmpMarker.remove();tmpMarker=L.circleMarker(ll,{radius:9,color:'#16a34a',weight:3,fill:false}).addTo(map).bindPopup(cadCoordHtml(cad,n.x,n.y,insHead(n))).openPopup();};
+    tb.appendChild(tr);
+  });
+  if(rows.length>800){const tr=document.createElement('tr');tr.innerHTML=`<td colspan=4 class="muted">… pokazano 800 z ${rows.length} – zawęź filtr (eksport obejmuje wszystkie)</td>`;tb.appendChild(tr);}
+}
+['#elLayer','#elAttr'].forEach(s=>$(s).onchange=renderElems);$('#elSearch').oninput=renderElems;
+function elemExportName(){const lf=$('#elLayer').value;return baseName()+(lf?'_'+lf.replace(/[^\w\-]+/g,'_'):'')+'_elementy';}
+$('#elCsv').onclick=()=>{
+  const rows=['Nazwa;Warstwa;Blok;Układ;X (N);Y (E);Szerokość;Długość;Google Maps'];
+  elemRows().forEach(({cad,n,nm})=>{const ll=cadToLL(cad,n.x,n.y);rows.push([nm,n.L.name,n.block,CAD_SYS[cad.sys],(n.y+cad.oy).toFixed(3).replace('.',','),(n.x+cad.ox).toFixed(3).replace('.',','),ll.lat.toFixed(7),ll.lng.toFixed(7),`https://www.google.com/maps?q=${ll.lat.toFixed(7)},${ll.lng.toFixed(7)}`].map(v=>/[;"\n]/.test(v)?'"'+String(v).replace(/"/g,'""')+'"':v).join(';'));});
+  download(elemExportName()+'.csv',new Blob(['﻿'+rows.join('\r\n')],{type:'text/csv'}));
+};
+$('#elKml').onclick=()=>{
+  const pm=elemRows().map(({cad,n,nm})=>{const ll=cadToLL(cad,n.x,n.y);return `<Placemark><name>${esc(nm)}</name><description>${esc(n.L.name+' · '+n.block+' · '+CAD_SYS[cad.sys]+' X '+(n.y+cad.oy).toFixed(2)+' Y '+(n.x+cad.ox).toFixed(2))}</description><Point><coordinates>${ll.lng.toFixed(7)},${ll.lat.toFixed(7)},0</coordinates></Point></Placemark>`;}).join('\n');
+  download(elemExportName()+'.kml',new Blob([`<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>${esc(elemExportName())}</name>\n${pm}\n</Document></kml>`],{type:'application/vnd.google-earth.kml+xml'}));
+};
+$('#elPins').onclick=()=>{const r=elemRows();r.forEach(({cad,n,nm})=>{const ll=cadToLL(cad,n.x,n.y);S.pins.push({name:nm,lat:ll.lat,lng:ll.lng});});saveState();updateUI();toast(`Dodano ${r.length} pinezek.`);};
+$('#cadMono').onchange=()=>{S.cadMono=$('#cadMono').value==='mono';cadLayer.redraw();};
+$('#cadTxt').onchange=()=>{S.cadTxt=$('#cadTxt').checked;cadLayer.redraw();};
+$('#snap').onchange=()=>{S.snap=$('#snap').checked;};
+
+
+/* ---------- GPS: moja pozycja ---------- */
+const GEO={watch:null,marker:null,circle:null,follow:true,last:null};
+function geoStart(){
+  if(!('geolocation' in navigator)){toast('Ta przeglądarka nie udostępnia lokalizacji.',5000);return;}
+  if(!window.isSecureContext){toast('Lokalizacja działa tylko, gdy narzędzie jest otwarte z adresu https:// (lub localhost) – nie z pliku.',9000);return;}
+  GEO.follow=true;$('#geoBox').style.display='block';$('#geoAcc').textContent='Szukam pozycji GPS…';
+  GEO.watch=navigator.geolocation.watchPosition(geoPos,geoErr,{enableHighAccuracy:true,maximumAge:1000,timeout:30000});
+  geoBtn();
+}
+function geoStop(){
+  if(GEO.watch!=null)navigator.geolocation.clearWatch(GEO.watch);GEO.watch=null;
+  if(GEO.marker)GEO.marker.remove();if(GEO.circle)GEO.circle.remove();GEO.marker=GEO.circle=null;GEO.last=null;
+  $('#geoBox').style.display='none';geoBtn();
+}
+function geoBtn(){const b=$('#btnGeoMap');b.classList.toggle('on',GEO.watch!=null&&GEO.follow);b.classList.toggle('lost',GEO.watch!=null&&!GEO.follow);$('#geoFollow').classList.toggle('on',GEO.follow);}
+function geoErr(e){
+  const m={1:'Brak zgody na lokalizację – zezwól w ustawieniach przeglądarki dla tej strony.',2:'Pozycja niedostępna (włącz GPS / lokalizację w telefonie).',3:'GPS nie odpowiada – wyjdź na otwarty teren.'}[e.code]||e.message;
+  $('#geoAcc').textContent=m;if(e.code===1)setTimeout(geoStop,6000);
+}
+function geoPos(p){
+  const lat=p.coords.latitude,lng=p.coords.longitude,acc=p.coords.accuracy;GEO.last={lat,lng,acc,t:p.timestamp};
+  if(!GEO.marker){
+    GEO.circle=L.circle([lat,lng],{radius:acc,color:'#1a73e8',weight:1,fillColor:'#1a73e8',fillOpacity:.12,interactive:false}).addTo(map);
+    GEO.marker=L.circleMarker([lat,lng],{radius:8,color:'#fff',weight:3,fillColor:'#1a73e8',fillOpacity:1,interactive:false}).addTo(map);
+    map.setView([lat,lng],Math.max(map.getZoom(),19));
+  }else{GEO.marker.setLatLng([lat,lng]);GEO.circle.setLatLng([lat,lng]).setRadius(acc);if(GEO.follow)map.panTo([lat,lng],{animate:false});}
+  geoInfo();
+}
+const DIRS=['N','NE','E','SE','S','SW','W','NW'];
+function geoInfo(){
+  const g=GEO.last;if(!g)return;
+  const q=toPL2000(g.lat,g.lng);
+  $('#geoAcc').innerHTML=`Dokładność GPS: ±${Math.round(g.acc)} m`+(g.acc>15?' <span class="warn">(słaba – poczekaj chwilę)</span>':'');
+  $('#geoXY').textContent=`${g.lat.toFixed(6)}, ${g.lng.toFixed(6)} · PL-2000/${q.z} X ${q.X.toFixed(1)} Y ${q.Y.toFixed(1)}`;
+  // najbliższe elementy z DWG (bloki z atrybutami na włączonych warstwach)
+  const near=[];
+  for(const cad of S.cads){if(!cad.sys||cad.hidden)continue;const p=llToCad(cad,g.lat,g.lng);
+    for(const n of cad.inserts){if(!n.attrs.length||!n.L.on)continue;const dx=n.x-p.x,dy=n.y-p.y,d=Math.hypot(dx,dy);if(d<300)near.push({n,d,az:(Math.atan2(dx,dy)*180/Math.PI+360)%360});}}
+  near.sort((a,b)=>a.d-b.d);
+  $('#geoNear').innerHTML=near.length?near.slice(0,3).map((o,i)=>`${i?'':'<b>'}${esc(insName(o.n))}${i?'':'</b>'} – ${o.d<10?fmt(o.d,1):Math.round(o.d)} m, ${DIRS[Math.round(o.az/45)%8]} <span class="muted">(${esc(o.n.L.name.replace(/^0_SRK_/,''))})</span>`).join('<br>'):(S.cads.length?'<span class="muted">Brak elementów DWG w promieniu 300 m (lub ich warstwy są wyłączone).</span>':'');
+}
+$('#btnGeoMap').onclick=()=>{if(GEO.watch==null)geoStart();else if(!GEO.follow){GEO.follow=true;if(GEO.last)map.setView([GEO.last.lat,GEO.last.lng],Math.max(map.getZoom(),18));geoBtn();}else{$('#geoBox').style.display=$('#geoBox').style.display==='none'?'block':'none';}};
+$('#geoOff').onclick=geoStop;
+$('#geoFollow').onclick=()=>{GEO.follow=!GEO.follow;if(GEO.follow&&GEO.last)map.panTo([GEO.last.lat,GEO.last.lng]);geoBtn();};
+$('#geoPin').onclick=()=>{const g=GEO.last;if(!g){toast('Brak pozycji GPS.');return;}addPin(g.lat,g.lng,'GPS '+new Date().toLocaleTimeString('pl-PL',{hour:'2-digit',minute:'2-digit'})+` (±${Math.round(g.acc)} m)`);toast('Dodano pinezkę w Twojej pozycji.');};
+$('#geoCopy').onclick=()=>{const g=GEO.last;if(g)copyText(`${g.lat.toFixed(6)}, ${g.lng.toFixed(6)}`);};
+map.on('dragstart',()=>{if(GEO.watch!=null&&GEO.follow){GEO.follow=false;geoBtn();}});
+map.on('layeradd layerremove',()=>{});
+
+/* ---------- ostatnie pliki (IndexedDB, tylko w tej przeglądarce) ---------- */
+function idbOpen(){return new Promise((res,rej)=>{const r=indexedDB.open('planmap',1);r.onupgradeneeded=()=>r.result.createObjectStore('files',{keyPath:'name'});r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
+async function recentList(){try{const db=await idbOpen();return await new Promise(res=>{const r=db.transaction('files').objectStore('files').getAll();r.onsuccess=()=>res((r.result||[]).sort((a,b)=>b.t-a.t));r.onerror=()=>res([]);});}catch(e){return [];}}
+async function rememberFile(f){
+  try{if(f.size>150e6)return;const db=await idbOpen();const all=await recentList();
+    await new Promise(res=>{const tx=db.transaction('files','readwrite'),st=tx.objectStore('files');st.put({name:f.name,type:f.type,blob:f,t:Date.now(),size:f.size});all.filter(x=>x.name!==f.name).slice(9).forEach(x=>st.delete(x.name));tx.oncomplete=res;tx.onerror=res;});
+    fillRecent();}catch(e){}
+}
+async function fillRecent(){const l=await recentList(),sel=$('#recent');sel.innerHTML='<option value="">Ostatnie pliki…</option>'+l.map(x=>`<option value="${esc(x.name)}">${esc(x.name)} (${(x.size/1e6).toFixed(1)} MB)</option>`).join('')+(l.length?'<option value="__clear">– wyczyść listę –</option>':'');}
+$('#recent').onchange=async e=>{
+  const v=e.target.value;e.target.value='';if(!v)return;
+  if(v==='__clear'){try{const db=await idbOpen();db.transaction('files','readwrite').objectStore('files').clear();}catch(err){}fillRecent();return;}
+  const r=(await recentList()).find(x=>x.name===v);if(r)openFiles([new File([r.blob],r.name,{type:r.type})],true);
+};
+fillRecent();
+$('#btnPanel').onclick=()=>{$('#left').classList.toggle('collapsed');setTimeout(()=>{map.invalidateSize();planLayer.redraw();cadLayer.redraw();pvResize();},60);};
+
+/* ---------- kontrolki ---------- */
+$('#file').onchange=e=>{openFiles([...e.target.files]);e.target.value='';};
+function openFiles(fs,fromRecent){for(const f of fs){if(!fromRecent)rememberFile(f);if(/\.(dwg|dxf)$/i.test(f.name)){loadCad(f);}else{S.file=f;S.fileName=f.name;S.page=1;$('#page').value=1;setMode(null);loadFile();}}}
+$('#page').onchange=()=>{S.page=parseInt($('#page').value)||1;if(S.file)loadFile();};
+$('#res').onchange=()=>{S.res=parseFloat($('#res').value);if(S.file)loadFile();};
+$('#op').oninput=()=>{S.opacity=$('#op').value/100;planLayer.redraw();cadLayer.redraw();};
+$('#cm').onchange=()=>{S.cm=$('#cm').value;processOverlay();};
+$('#col').onchange=()=>{S.color=$('#col').value;processOverlay();cadLayer.redraw();};
+$('#white').onchange=()=>{S.white=$('#white').checked;processOverlay();};
+$('#showOv').onchange=()=>{S.showOv=$('#showOv').checked;planLayer.redraw();};
+$('#lock').onchange=()=>{S.lock=$('#lock').checked;refit();saveState();};
+$('#den').onchange=()=>{S.den=num($('#den').value)||500;refit();saveState();};
+$('#btnLayout').onclick=()=>{$('main').classList.toggle('vert');try{localStorage.setItem('planGeoref:layout',$('main').classList.contains('vert')?'v':'h');}catch(e){}setTimeout(()=>{map.invalidateSize();planLayer.redraw();pvFit();},50);};
+try{if(localStorage.getItem('planGeoref:layout')==='v')$('main').classList.add('vert');}catch(e){}
+$('#btnFitView').onclick=()=>{if(S.fit)map.fitBounds(planBounds(),{padding:[30,30]});};
+(function dragbar(){const bar=$('#dragbar'),left=$('#left');let on=false;bar.addEventListener('pointerdown',e=>{on=true;bar.setPointerCapture(e.pointerId);});
+  bar.addEventListener('pointermove',e=>{if(!on)return;const w=Math.min(Math.max(e.clientX,240),window.innerWidth-260);left.style.width=w+'px';map.invalidateSize();});
+  bar.addEventListener('pointerup',()=>{on=false;map.invalidateSize();planLayer.redraw();});})();
+window.addEventListener('dragover',e=>e.preventDefault());
+window.addEventListener('drop',e=>{e.preventDefault();openFiles([...e.dataTransfer.files]);});
+initWorker();updateUI();renderLayers();renderElems();
+</script>
+</body>
+</html>
