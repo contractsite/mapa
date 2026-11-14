@@ -236,14 +236,50 @@ const S={file:null,fileName:'',page:1,res:2,k:2,src:null,ov:null,Wpt:0,Hpt:0,
   cursor:null,highlight:null};
 
 /* ---------- mapa ---------- */
-const map=L.map('map',{zoomAnimation:false,maxZoom:22,zoomSnap:0.5}).setView([52.1,19.2],6);
+const MAXZ=23;
+const map=L.map('map',{zoomAnimation:false,maxZoom:MAXZ,zoomSnap:0.5}).setView([52.1,19.2],6);
+/* ESRI World Imagery z doczytywaniem: tam, gdzie brak zdjęć na danym zoomie (zwykle >20), powiększa najbliższy dostępny poziom */
+const EsriImagery=L.TileLayer.extend({
+  initialize(opts){L.TileLayer.prototype.initialize.call(this,'',opts);this._maxz=new Map();},
+  _url14(z,x,y){const d=z-14;return d>0?(x>>d)+'/'+(y>>d):'';},
+  createTile(coords,done){
+    const tile=document.createElement('div'),img=document.createElement('img'),ts=this.getTileSize().x;
+    img.alt='';img.draggable=false;img.style.cssText='position:absolute;max-width:none;user-select:none';
+    tile.style.overflow='hidden';tile.appendChild(img);
+    const key=this._url14(coords.z,coords.x,coords.y),known=key&&this._maxz.get(key);
+    let z=Math.min(coords.z,known||coords.z),tries=0;
+    const go=()=>{const d=coords.z-z,sc=1<<d,x=coords.x>>d,y=coords.y>>d;
+      img.style.width=img.style.height=(ts*sc)+'px';img.style.left=(-(coords.x-x*sc)*ts)+'px';img.style.top=(-(coords.y-y*sc)*ts)+'px';
+      img.src=`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}?blankTile=false`;};
+    img.onload=()=>{if(key&&z<coords.z&&(!this._maxz.get(key)||this._maxz.get(key)>z))this._maxz.set(key,z);done(null,tile);};
+    img.onerror=()=>{if(z>12&&tries<10){z--;tries++;go();}else done(new Error('brak kafla'),tile);};
+    go();return tile;
+  }
+});
 const bases={
-  'ESRI World Imagery':L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:19,maxZoom:22,attribution:'Tiles &copy; Esri &mdash; Esri, Maxar, Earthstar Geographics, GIS User Community'}),
-  'Geoportal – ortofotomapa (WMS)':L.tileLayer.wms('https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/HighResolution',{layers:'Raster',format:'image/jpeg',version:'1.1.1',maxZoom:22,attribution:'&copy; GUGiK geoportal.gov.pl'}),
-  'OpenStreetMap':L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxNativeZoom:19,maxZoom:22,attribution:'&copy; OpenStreetMap'})
+  'ESRI World Imagery':new EsriImagery({maxZoom:MAXZ,attribution:'Tiles &copy; Esri &mdash; Esri, Maxar, Earthstar Geographics, GIS User Community'}),
+  'Geoportal – ortofotomapa':L.tileLayer.wms('https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/HighResolution',{layers:'Raster',format:'image/jpeg',version:'1.3.0',crs:L.CRS.EPSG4326,maxZoom:MAXZ,attribution:'&copy; GUGiK geoportal.gov.pl'}),
+  'OpenStreetMap':L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxNativeZoom:19,maxZoom:MAXZ,attribution:'&copy; OpenStreetMap'})
 };
-bases['ESRI World Imagery'].addTo(map);
-const labels=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:19,maxZoom:22});
+const PRG='https://mapy.geoportal.gov.pl/wss/service/PZGIK/PRG/WMS/AdministrativeBoundaries';
+const prgLayer=(name,minZoom)=>L.tileLayer.wms(PRG,{layers:name,format:'image/png',transparent:true,version:'1.3.0',maxZoom:MAXZ,minZoom,attribution:'PRG &copy; GUGiK'});
+const labels=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:19,maxZoom:MAXZ});
+const overlays={
+  'Nazwy miejscowości (ESRI)':labels,
+  'Nazwy urzędowe (PRNG)':L.tileLayer.wms('https://mapy.geoportal.gov.pl/wss/service/PZGIK/PRNG/WMS/GeographicalNames',{layers:'M1_UrzedoweNazwyMiejscowosci,M2_PozostaleNazwyMiejscowosci',format:'image/png',transparent:true,version:'1.3.0',maxZoom:MAXZ,minZoom:11,attribution:'PRNG &copy; GUGiK'}),
+  'Granice państw':prgLayer('A00_Granice_panstwa',0),
+  'Granice województw':prgLayer('A01_Granice_wojewodztw',0),
+  'Granice powiatów':prgLayer('A02_Granice_powiatow',7),
+  'Granice gmin':prgLayer('A03_Granice_gmin',9)
+};
+const DEF_ON=['Nazwy miejscowości (ESRI)','Granice państw','Granice województw','Granice powiatów','Granice gmin'];
+(function restoreLayers(){
+  let st=null;try{st=JSON.parse(localStorage.getItem('planGeoref:layers')||'null');}catch(e){}
+  const base=st&&bases[st.base]?st.base:'ESRI World Imagery';bases[base].addTo(map);
+  const on=st&&Array.isArray(st.on)?st.on:DEF_ON;Object.entries(overlays).forEach(([k,l])=>{if(on.includes(k))l.addTo(map);});
+})();
+function saveLayers(){try{const base=Object.keys(bases).find(k=>map.hasLayer(bases[k]));localStorage.setItem('planGeoref:layers',JSON.stringify({base,on:Object.keys(overlays).filter(k=>map.hasLayer(overlays[k]))}));}catch(e){}}
+map.on('baselayerchange overlayadd overlayremove',saveLayers);
 map.createPane('planPane');map.getPane('planPane').style.zIndex=450;map.getPane('planPane').style.pointerEvents='none';
 
 const PlanLayer=L.Layer.extend({
@@ -263,7 +299,7 @@ const PlanLayer=L.Layer.extend({
   }
 });
 const planLayer=new PlanLayer().addTo(map);
-L.control.layers(bases,{'Nazwy i granice (ESRI)':labels},{position:'topright'}).addTo(map);
+L.control.layers(bases,overlays,{position:'topright'}).addTo(map);
 L.control.scale({imperial:false}).addTo(map);
 const cpLayer=L.layerGroup().addTo(map), pinLayer=L.layerGroup().addTo(map);
 let tmpMarker=null;
