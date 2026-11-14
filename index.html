@@ -262,11 +262,34 @@ const bases={
   'OpenStreetMap':L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxNativeZoom:19,maxZoom:MAXZ,attribution:'&copy; OpenStreetMap'})
 };
 const PRG='https://mapy.geoportal.gov.pl/wss/service/PZGIK/PRG/WMS/AdministrativeBoundaries';
-const prgLayer=(name,minZoom)=>L.tileLayer.wms(PRG,{layers:name,format:'image/png',transparent:true,version:'1.3.0',maxZoom:MAXZ,minZoom,attribution:'PRG &copy; GUGiK'});
+/* WMS jako jeden obraz na cały widok (bez kafli) – podpisy jednostek pojawiają się raz, a nie na każdym kafelku */
+const WmsView=L.Layer.extend({
+  initialize(url,o){this._url=url;L.setOptions(this,o);},
+  getAttribution(){return this.options.attribution;},
+  onAdd(m){this._m=m;m.on('moveend zoomend resize',this._upd,this);this._upd();},
+  onRemove(m){m.off('moveend zoomend resize',this._upd,this);if(this._ov)this._ov.remove();if(this._nx)this._nx.remove();this._ov=this._nx=null;},
+  _upd(){
+    const m=this._m;if(!m)return;clearTimeout(this._t);
+    this._t=setTimeout(()=>{
+      if(m.getZoom()<(this.options.minZoom||0)){if(this._ov){this._ov.remove();this._ov=null;}return;}
+      const b=m.getBounds(),sz=m.getSize(),dpr=Math.min(2,window.devicePixelRatio||1),P=L.CRS.EPSG3857;
+      const sw=P.project(b.getSouthWest()),ne=P.project(b.getNorthEast());
+      const W=Math.min(4096,Math.round(sz.x*dpr)),H=Math.min(4096,Math.round(sz.y*dpr));
+      const u=this._url+'?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&STYLES=&FORMAT=image/png&TRANSPARENT=true&CRS=EPSG:3857'
+        +'&LAYERS='+encodeURIComponent(this.options.layers)+`&WIDTH=${W}&HEIGHT=${H}&BBOX=${sw.x},${sw.y},${ne.x},${ne.y}`;
+      const nx=L.imageOverlay(u,b,{pane:this.options.pane||'overlayPane',opacity:this.options.opacity||1,interactive:false});
+      if(this._nx)this._nx.remove();this._nx=nx;
+      nx.once('load',()=>{if(this._nx!==nx)return;if(this._ov)this._ov.remove();this._ov=nx;this._nx=null;});
+      nx.once('error',()=>{if(this._nx===nx){nx.remove();this._nx=null;}});
+      nx.addTo(m);
+    },120);
+  }
+});
+const prgLayer=(name,minZoom)=>new WmsView(PRG,{layers:name,minZoom,attribution:'PRG &copy; GUGiK'});
 const labels=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:19,maxZoom:MAXZ});
 const overlays={
   'Nazwy miejscowości (ESRI)':labels,
-  'Nazwy urzędowe (PRNG)':L.tileLayer.wms('https://mapy.geoportal.gov.pl/wss/service/PZGIK/PRNG/WMS/GeographicalNames',{layers:'M1_UrzedoweNazwyMiejscowosci,M2_PozostaleNazwyMiejscowosci',format:'image/png',transparent:true,version:'1.3.0',maxZoom:MAXZ,minZoom:11,attribution:'PRNG &copy; GUGiK'}),
+  'Nazwy urzędowe (PRNG)':new WmsView('https://mapy.geoportal.gov.pl/wss/service/PZGIK/PRNG/WMS/GeographicalNames',{layers:'M1_UrzedoweNazwyMiejscowosci,M2_PozostaleNazwyMiejscowosci',minZoom:11,attribution:'PRNG &copy; GUGiK'}),
   'Granice państw':prgLayer('A00_Granice_panstwa',0),
   'Granice województw':prgLayer('A01_Granice_wojewodztw',0),
   'Granice powiatów':prgLayer('A02_Granice_powiatow',7),
