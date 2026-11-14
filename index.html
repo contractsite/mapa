@@ -128,7 +128,7 @@
     <label title="Klik na mapie przyciąga do wierzchołków i punktów wstawienia bloków"><input type="checkbox" id="snap" checked> przyciąganie</label>
   </div>
   <div class="grp">
-    <button id="btnPin" disabled title="Kliknięcie na planie lub mapie dodaje pinezkę">Pinezki</button>
+    <button id="btnPin" disabled title="Wskazywanie urządzeń / pinezki: klik na symbolu DWG dodaje urządzenie do listy, ponowny klik usuwa">Wskaż urządzenia</button>
     <button id="btnFitView" disabled>Pokaż plan</button>
     <button id="btnLayout" title="Plan obok mapy / nad mapą (wygodniejsze dla długich planów)">⇅ Układ</button>
     <button id="btnKmz" disabled title="Plan + pinezki do Google Earth">Eksport KMZ</button>
@@ -166,7 +166,13 @@
       <h3>Punkty dopasowania</h3>
       <table id="cpTable"><thead><tr><th>#</th><th>plan [pt]</th><th>mapa</th><th>błąd</th><th></th></tr></thead><tbody></tbody></table>
       <h3>Pinezki <span class="muted" style="text-transform:none;letter-spacing:0">
-        <button id="pinCsv" disabled>CSV</button> <button id="pinKml" disabled>KML</button> <button id="pinCopy" disabled>Kopiuj listę</button> <button id="pinClear" disabled>Usuń wszystkie</button></span></h3>
+        <button id="pinCsv" disabled>CSV</button> <button id="pinKml" disabled>KML</button> <button id="pinClear" disabled>Usuń wszystkie</button></span></h3>
+      <div id="shareBox" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0 8px">
+        <input type="text" id="shareTitle" placeholder="Tytuł wiadomości, np. Gołańcz – czujniki do montażu" style="flex:1;min-width:200px">
+        <label title="Linki otwierają od razu nawigację Google Maps do punktu"><input type="checkbox" id="shareNav"> linki do nawigacji</label>
+        <button id="shareWA" class="primary" disabled style="background:#25d366;border-color:#25d366">WhatsApp</button>
+        <button id="pinCopy" disabled>Kopiuj tekst</button>
+      </div>
       <table id="pinTable"><thead><tr><th>Nazwa</th><th>WGS84</th><th>PL-2000</th><th></th></tr></thead><tbody></tbody></table>
       </div>
     </div>
@@ -404,7 +410,12 @@ map.on('click',e=>{
   const sn=(S.snap&&S.cads.length)?cadSnap(e.latlng):null;
   if(sn){lat=sn.ll.lat;lng=sn.ll.lng;}
   if(S.mode==='map'&&S.pending){addCP(S.pending.x,S.pending.y,lat,lng);if(sn)toast('Punkt przyciągnięty do rysunku DWG.');return;}
-  if(S.mode==='pin'){addPin(lat,lng,sn&&sn.ins?insName(sn.ins):undefined);return;}
+  if(S.mode==='pin'){
+    const h=S.cads.length?cadHitInsert(e.latlng,true):null;
+    if(h){const ref=h.cad.name+'#'+h.n.i,ix=S.pins.findIndex(p=>p.ref===ref);
+      if(ix>=0){S.pins.splice(ix,1);saveState();updateUI();toast('Usunięto z listy: '+S.pins.length+' poz.');return;}
+      const ll=cadToLL(h.cad,h.n.x,h.n.y);S.pins.push({name:insName(h.n),lat:ll.lat,lng:ll.lng,ref});saveState();updateUI();toast(`Dodano: ${insName(h.n)} (razem ${S.pins.length})`);return;}
+    addPin(lat,lng,sn&&sn.ins?insName(sn.ins):undefined);return;}
   if(S.mode==='plan'){toast('Najpierw kliknij punkt na PLANIE (lewy panel).');return;}
   const hit=S.cads.length?cadHitInsert(e.latlng):null;
   if(hit){L.popup().setLatLng(cadToLL(hit.cad,hit.n.x,hit.n.y)).setContent(cadCoordHtml(hit.cad,hit.n.x,hit.n.y,insHead(hit.n))).openOn(map);return;}
@@ -437,7 +448,7 @@ function setMode(m){
   map.getContainer().style.cursor=(m==='map'||m==='pin')?'crosshair':'';
   if(m==='plan')status('Kliknij punkt charakterystyczny na PLANIE (lewy panel). Esc – anuluj.');
   else if(m==='map')status('Teraz kliknij TEN SAM punkt na MAPIE – albo wpisz jego współrzędne (lewy dolny róg). Esc – anuluj.');
-  else if(m==='pin')status('Pinezki: klikaj na planie albo mapie. Esc – koniec.');
+  else if(m==='pin')status(S.cads.length?'Wskazuj symbole urządzeń na mapie (ponowny klik usuwa). Lista: „Dopasowanie i pinezki”. Esc – koniec.':'Pinezki: klikaj na planie albo mapie. Esc – koniec.');
   else{status(null);S.pending=null;pvDraw();}
 }
 function addCP(x,y,lat,lng){S.pts.push({x,y,lat,lng,res:null});S.pending=null;setMode(null);refit();saveState();if(S.fit&&S.fit.n===2&&S.pts.length===2)map.fitBounds(planBounds(),{padding:[30,30]});}
@@ -467,15 +478,32 @@ $('#pinCsv').onclick=()=>{
   S.pins.forEach(p=>{const q=toPL2000(p.lat,p.lng);rows.push([p.name,p.lat.toFixed(6),p.lng.toFixed(6),q.z,q.X.toFixed(2).replace('.',','),q.Y.toFixed(2).replace('.',','),`https://www.google.com/maps?q=${p.lat.toFixed(6)},${p.lng.toFixed(6)}`].join(';'));});
   download(baseName()+'_pinezki.csv',new Blob(['﻿'+rows.join('\r\n')],{type:'text/csv'}));
 };
-$('#pinCopy').onclick=()=>copyText(S.pins.map(p=>`${p.name}\t${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}\thttps://www.google.com/maps?q=${p.lat.toFixed(6)},${p.lng.toFixed(6)}`).join('\n'));
+function shareText(){
+  const nav=$('#shareNav').checked,t=$('#shareTitle').value.trim(),L=[];
+  if(t)L.push('*'+t+'*','');
+  S.pins.forEach((p,i)=>{const c=p.lat.toFixed(6)+','+p.lng.toFixed(6);
+    L.push(`${i+1}. *${p.name}*`,nav?`https://www.google.com/maps/dir/?api=1&destination=${c}`:`https://maps.google.com/?q=${c}`);});
+  return L.join('\n');
+}
+$('#pinCopy').onclick=()=>copyText(shareText());
+$('#shareWA').onclick=async()=>{
+  if(!S.pins.length)return;const txt=shareText();
+  if(navigator.share&&/Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)){try{await navigator.share({text:txt});return;}catch(e){if(e&&e.name==='AbortError')return;}}
+  const url='https://wa.me/?text='+encodeURIComponent(txt);
+  if(url.length>7500){copyText(txt);toast('Lista jest długa – skopiowałem tekst, wklej go w WhatsApp.',6000);return;}
+  const a=document.createElement('a');a.href=url;a.target='_blank';a.rel='noopener';document.body.appendChild(a);a.click();a.remove();
+};
+try{$('#shareTitle').value=localStorage.getItem('planGeoref:shareTitle')||'';$('#shareNav').checked=localStorage.getItem('planGeoref:shareNav')==='1';}catch(e){}
+$('#shareTitle').onchange=()=>{try{localStorage.setItem('planGeoref:shareTitle',$('#shareTitle').value)}catch(e){}};
+$('#shareNav').onchange=()=>{try{localStorage.setItem('planGeoref:shareNav',$('#shareNav').checked?'1':'0')}catch(e){}};
 $('#pinClear').onclick=()=>{if(!S.pins.length)return;if($('#pinClear').dataset.arm){S.pins=[];delete $('#pinClear').dataset.arm;$('#pinClear').textContent='Usuń wszystkie';saveState();updateUI();}else{$('#pinClear').dataset.arm=1;$('#pinClear').textContent='Na pewno?';setTimeout(()=>{delete $('#pinClear').dataset.arm;$('#pinClear').textContent='Usuń wszystkie';},3000);}};
-$('#btnPin').onclick=()=>setMode(S.mode==='pin'?null:'pin');
+$('#btnPin').onclick=()=>{setMode(S.mode==='pin'?null:'pin');if(S.mode==='pin')showTab('tabFit');};
 
 /* ---------- UI ---------- */
 function updateUI(){
   const has=!!S.src;
   $('#btnCP').disabled=!has;$('#btnPin').disabled=!S.fit&&!S.cads.length;$('#left').classList.toggle('nopdf',!S.src&&S.cads.length>0);$('#btnFitView').disabled=!S.fit;$('#btnKmz').disabled=!S.fit;$('#btnSave').disabled=!has;if(S.cads&&S.cads.length&&!S._cadRendered){S._cadRendered=true;}
-  ['#pinCsv','#pinKml','#pinCopy','#pinClear'].forEach(s=>$(s).disabled=!S.pins.length);
+  ['#pinCsv','#pinKml','#pinCopy','#pinClear','#shareWA'].forEach(s=>$(s).disabled=!S.pins.length);
   const fi=$('#fitInfo');
   if(!S.fit)fi.innerHTML=has?`Brak dopasowania – potrzebne min. 2 punkty (masz ${S.pts.length}).`:'Brak dopasowania.';
   else{
@@ -509,7 +537,7 @@ function updateUI(){
     const mk=L.marker([p.lat,p.lng],{draggable:true,icon:L.divIcon({className:'pin-icon',html:'<div></div>',iconSize:[20,20],iconAnchor:[10,20]})}).addTo(pinLayer);
     mk.bindTooltip(p.name,{permanent:false,direction:'top',offset:[0,-18]});
     mk.on('dragend',()=>{const ll=mk.getLatLng();p.lat=ll.lat;p.lng=ll.lng;saveState();updateUI();});
-    mk.on('click',()=>{mk.bindPopup(`<b>${p.name}</b><br>`+coordHtml(p.lat,p.lng)).openPopup();});
+    mk.on('click',()=>{if(S.mode==='pin'){S.pins.splice(i,1);saveState();updateUI();return;}mk.bindPopup(`<b>${p.name}</b><br>`+coordHtml(p.lat,p.lng)).openPopup();});
   });
   planLayer.redraw();pvDraw();
 }
@@ -608,13 +636,15 @@ function flattenCad(db,name){
   const LI=new Map(db.tables.LAYER.entries.map(l=>[l.name,l]));
   const cad={name,ox:null,oy:null,groups:new Map(),texts:[],inserts:[],verts:[],vlay:[],layers:new Map(),bbox:[1e18,1e18,-1e18,-1e18],sys:null};
   const lay=n=>{let L=cad.layers.get(n);if(!L){const li=LI.get(n)||{};L={name:n,on:!(li.off||li.frozen)&&n.toLowerCase()!=='defpoints',n:0,color:li.color!=null&&li.color>=0?li.color:0xffffff,idx:cad.layers.size};cad.layers.set(n,L);}return L;};
+  let curIns=null;
   const org=(x,y)=>{if(cad.ox===null){cad.ox=Math.round(x/1000)*1000;cad.oy=Math.round(y/1000)*1000;}};
   const ap=(M,x,y)=>[M[0]*x+M[2]*y+M[4],M[1]*x+M[3]*y+M[5]];
   const mul=(A,B)=>[A[0]*B[0]+A[2]*B[1],A[1]*B[0]+A[3]*B[1],A[0]*B[2]+A[2]*B[3],A[1]*B[2]+A[3]*B[3],A[0]*B[4]+A[2]*B[5]+A[4],A[1]*B[4]+A[3]*B[5]+A[5]];
   function poly(L,col,pts,M,closed,vertsToo){
     if(pts.length<2)return;const out=new Float64Array(pts.length*2+(closed?2:0));
     for(let i=0;i<pts.length;i++){const [X,Y]=ap(M,pts[i][0],pts[i][1]);org(X,Y);out[2*i]=X-cad.ox;out[2*i+1]=Y-cad.oy;
-      if(X<cad.bbox[0])cad.bbox[0]=X;if(Y<cad.bbox[1])cad.bbox[1]=Y;if(X>cad.bbox[2])cad.bbox[2]=X;if(Y>cad.bbox[3])cad.bbox[3]=Y;}
+      if(X<cad.bbox[0])cad.bbox[0]=X;if(Y<cad.bbox[1])cad.bbox[1]=Y;if(X>cad.bbox[2])cad.bbox[2]=X;if(Y>cad.bbox[3])cad.bbox[3]=Y;
+      if(curIns){const x=X-cad.ox,y=Y-cad.oy,b=curIns.bb;if(x<b[0])b[0]=x;if(y<b[1])b[1]=y;if(x>b[2])b[2]=x;if(y>b[3])b[3]=y;}}
     if(closed){out[out.length-2]=out[0];out[out.length-1]=out[1];}
     const key=L.name+'\u0001'+col;let g=cad.groups.get(key);if(!g){g={layer:L,color:col,polys:[]};cad.groups.set(key,g);}g.polys.push(out);L.n++;
     if(vertsToo)for(const i of vertsToo){cad.verts.push(out[2*i],out[2*i+1]);cad.vlay.push(L.idx);}
@@ -682,14 +712,18 @@ function flattenCad(db,name){
       case 'DIMENSION':{const b=blocks.get(e.name);if(b&&depth<8)for(const c of b.entities||[])emit(c,M,{layer:ln,color:col},depth+1);break;}
       case 'INSERT':{
         const b=blocks.get(e.name);const ip=e.insertionPoint;
+        let myIns=null;
         if(depth===0){const [X,Y]=ap(M,ip.x,ip.y);org(X,Y);
-          cad.inserts.push({L,block:e.name,attrs:(e.attribs||[]).map(a=>({tag:a.tag||(a.text&&a.text.tag)||'',v:txtOf(a.text)})).filter(a=>a.v!==''),x:X-cad.ox,y:Y-cad.oy});
+          myIns={L,block:e.name,attrs:(e.attribs||[]).map(a=>({tag:a.tag||(a.text&&a.text.tag)||'',v:txtOf(a.text)})).filter(a=>a.v!==''),x:X-cad.ox,y:Y-cad.oy,i:cad.inserts.length};
+          myIns.bb=[myIns.x,myIns.y,myIns.x,myIns.y];cad.inserts.push(myIns);
           cad.verts.push(X-cad.ox,Y-cad.oy);cad.vlay.push(L.idx);}
         if(b&&depth<8&&(b.entities||[]).length){
           const bp=b.basePoint||{x:0,y:0},r=e.rotation||0,sx=e.xScale||1,sy=e.yScale||1,c=Math.cos(r),s=Math.sin(r);
           let Mi=mul(M,[c,s,-s,c,ip.x,ip.y]);Mi=mul(Mi,[sx,0,0,sy,0,0]);Mi=mul(Mi,[1,0,0,1,-bp.x,-bp.y]);
           if(ez)Mi=mul(Mi,[-1,0,0,1,0,0]);
+          const prevIns=curIns;if(myIns)curIns=myIns;
           for(const ch of b.entities)if(ch.type!=='ATTDEF')emit(ch,Mi,{layer:ln,color:col},depth+1);
+          curIns=prevIns;
         }
         for(const a of e.attribs||[]){const t=a.text;if(!t||typeof t!=='object'||a.isVisible===false)continue;
           const p=(t.halign||t.valign)&&t.endPoint&&(t.endPoint.x||t.endPoint.y)?t.endPoint:t.startPoint;
@@ -804,17 +838,20 @@ function cadSnap(latlng){
   const ins=best.cad.inserts.find(n=>Math.abs(n.x-best.x)<1e-6&&Math.abs(n.y-best.y)<1e-6&&n.L.on);
   best.ins=ins||null;best.ll=cadToLL(best.cad,best.x,best.y);return best;
 }
-function cadHitInsert(latlng){
-  let best=null;
-  for(const cad of S.cads){if(!cad.sys||cad.hidden||!cad.A)continue;const p=llToCad(cad,latlng.lat,latlng.lng),tol=16/cad.sc;
-    for(const n of cad.inserts){if(!n.L.on||!n.attrs.length)continue;const d=Math.hypot(n.x-p.x,n.y-p.y);if(d<=tol&&(!best||d<best.d))best={cad,n,d};}}
-  return best;
+function cadHitInsert(latlng,any){
+  // trafienie w symbol: punkt wewnątrz obrysu bloku (+ margines), wygrywa najmniejszy obrys; awaryjnie najbliższy punkt wstawienia
+  let best=null,near=null;
+  for(const cad of S.cads){if(!cad.sys||cad.hidden||!cad.A)continue;const p=llToCad(cad,latlng.lat,latlng.lng),m=6/cad.sc,tol=16/cad.sc;
+    for(const n of cad.inserts){if(!n.L.on)continue;if(!any&&!n.attrs.length)continue;
+      const b=n.bb;if(b&&p.x>=b[0]-m&&p.x<=b[2]+m&&p.y>=b[1]-m&&p.y<=b[3]+m){const ar=(b[2]-b[0]+2*m)*(b[3]-b[1]+2*m);if(ar*cad.sc*cad.sc<250000&&(!best||ar<best.ar))best={cad,n,ar};}
+      const d=Math.hypot(n.x-p.x,n.y-p.y);if(d<=tol&&(!near||d<near.d))near={cad,n,d};}}
+  return best||near;
 }
 function cadCoordHtml(cad,x,y,head){
   const ll=cadToLL(cad,x,y),E=x+cad.ox,N=y+cad.oy;
   return (head||'')+`<table><tr><td>${CAD_SYS[cad.sys]}</td><td><b>X ${fmtXY(N)}  Y ${fmtXY(E)}</b></td></tr><tr><td colspan=2 class="muted" style="font-size:11px">dokładnie z rysunku (X=N, Y=E)</td></tr></table>`+coordHtml(ll.lat,ll.lng);
 }
-function insName(n){return n.attrs.map(a=>a.v).join(' / ')||n.block;}
+function insName(n){return n.attrs.map(a=>a.v).join(' / ')||(n.block.startsWith('*')?n.L.name.replace(/^0_SRK_/,''):n.block);}
 function insHead(n){return `<div style="margin-bottom:4px"><b>${esc(insName(n))}</b><br><span class="muted">${esc(n.L.name)} · blok ${esc(n.block)}</span>`+(n.attrs.length>1?'<br>'+n.attrs.map(a=>esc(a.tag)+': '+esc(a.v)).join('<br>'):'')+'</div>';}
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 
